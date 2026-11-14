@@ -72,7 +72,8 @@ pub type Handler =
   fn(Request, Env, Context) -> Promise(Response)
 
 /// The raw Fetch API `Request` object provided by the Workers runtime.
-type JsRequest
+@internal
+pub type JsRequest
 
 /// The raw Fetch API `Response` object handed back to the Workers runtime.
 type JsResponse
@@ -182,6 +183,14 @@ pub fn pass_through_on_exception(ctx: Context) -> Nil
 ///
 pub opaque type RequestBody {
   RequestBody(raw: JsRequest)
+}
+
+/// Wrap a JS `Request` as a request body. Used by `rays/workers/simulate`,
+/// which builds the JS `Request` itself.
+///
+@internal
+pub fn request_body(raw: JsRequest) -> RequestBody {
+  RequestBody(raw)
 }
 
 /// An incoming HTTP request.

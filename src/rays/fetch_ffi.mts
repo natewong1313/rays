@@ -52,12 +52,15 @@ function init(status: number, headers: Header[]): ResponseInit {
   return { status, headers: h };
 }
 
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
+
 function make(
   status: number,
   headers: Header[],
   body: BodyInit | null,
 ): Response {
-  return new Response(body, init(status, headers));
+  const allowed = NULL_BODY_STATUSES.has(status) ? null : body;
+  return new Response(allowed, init(status, headers));
 }
 
 export function textResponse(
