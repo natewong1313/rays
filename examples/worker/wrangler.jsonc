@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "rays-worker-example",
+  "main": "index.mts",
+  "compatibility_date": "2026-09-01",
+  "build": {
+    "command": "gleam build",
+    "watch_dir": "src"
+  },
+  "vars": {
+    "GREETING": "Hello from Gleam on Cloudflare!"
+  }
+}

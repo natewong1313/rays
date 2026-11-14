@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2022"],
+    "types": ["@cloudflare/workers-types"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    // Gleam copies `src/` and `test/` FFI files next to the compiled modules
+    // in `build/dev/javascript/rays/`. Treating all three as one virtual
+    // directory lets relative imports like `../gleam.mjs` resolve from the
+    // source tree, so editors and `tsc` check the files we actually edit.
+    "rootDirs": ["src", "test", "build/dev/javascript/rays"]
+  },
+  "include": ["src/**/*.mts", "test/**/*.mts"]
+}

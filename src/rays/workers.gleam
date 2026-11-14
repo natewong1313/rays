@@ -1,0 +1,672 @@
+//// Write Cloudflare Workers in Gleam.
+////
+//// The API follows [Wisp](https://hexdocs.pm/wisp): requests and responses
+//// are `gleam_http` types, routing is plain pattern matching, and middleware
+//// is written with `use`. The difference is that Workers are asynchronous, so
+//// handlers return a `Promise(Response)`.
+////
+//// ```gleam
+//// import gleam/javascript/promise.{type Promise}
+//// import rays/workers.{type Context, type Env, type Request, type Response}
+////
+//// pub fn main() -> workers.Worker {
+////   workers.new(handle_request)
+//// }
+////
+//// fn handle_request(req: Request, _env: Env, _ctx: Context) -> Promise(Response) {
+////   case workers.path_segments(req) {
+////     [] -> workers.ok() |> workers.html_body("<h1>Hello!</h1>") |> promise.resolve
+////     _ -> promise.resolve(workers.not_found())
+////   }
+//// }
+//// ```
+////
+//// The worker is exported to Cloudflare from a small entry module:
+////
+//// ```ts
+//// // index.mts
+//// import { main } from "./build/dev/javascript/my_app/my_app.mjs";
+//// export default main();
+//// ```
+
+import gleam/bit_array
+import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
+import gleam/http.{type Method}
+import gleam/http/request.{type Request as HttpRequest}
+import gleam/http/response.{type Response as HttpResponse, Response}
+import gleam/javascript/array.{type Array}
+import gleam/javascript/promise.{type Promise}
+import gleam/json
+import gleam/list
+import gleam/result
+import gleam/string
+import gleam/uri
+
+//
+// Worker
+//
+
+/// A Cloudflare Worker, ready to be exported as the default export of the
+/// Worker's entry module.
+///
+/// At runtime this is the `ExportedHandler` object Cloudflare expects, with a
+/// `fetch` method.
+///
+pub type Worker
+
+/// The bindings configured for the Worker: environment variables, secrets,
+/// and resources such as KV namespaces or D1 databases.
+///
+pub type Env
+
+/// The Worker's execution context, used to extend the lifetime of the
+/// request with `wait_until` and to control failure behaviour with
+/// `pass_through_on_exception`.
+///
+pub type Context
+
+/// A function that handles an incoming HTTP request.
+///
+pub type Handler =
+  fn(Request, Env, Context) -> Promise(Response)
+
+/// The raw Fetch API `Request` object provided by the Workers runtime.
+type JsRequest
+
+/// The raw Fetch API `Response` object handed back to the Workers runtime.
+type JsResponse
+
+/// Create a Worker that handles HTTP requests with the given handler.
+///
+/// # Examples
+///
+/// ```gleam
+/// pub fn main() -> workers.Worker {
+///   workers.new(handle_request)
+/// }
+/// ```
+///
+pub fn new(handler: Handler) -> Worker {
+  make_worker(fn(raw, env, ctx) {
+    case from_js_request(raw) {
+      Ok(request) -> handler(request, env, ctx) |> promise.map(to_js_response)
+      Error(_) -> promise.resolve(to_js_response(bad_request("")))
+    }
+  })
+}
+
+fn from_js_request(raw: JsRequest) -> Result(Request, Nil) {
+  use uri <- result.try(uri.parse(js_request_url(raw)))
+  use request <- result.try(request.from_uri(uri))
+  use method <- result.try(http.parse_method(js_request_method(raw)))
+  Ok(
+    request.Request(
+      ..request,
+      method:,
+      headers: array.to_list(js_request_headers(raw)),
+      body: RequestBody(raw),
+    ),
+  )
+}
+
+fn to_js_response(response: Response) -> JsResponse {
+  let Response(status:, headers:, body:) = response
+  let headers = array.from_list(headers)
+  case body {
+    Text(text) -> js_text_response(status, headers, text)
+    Bytes(bits) ->
+      case bit_array.bit_size(bits) % 8 {
+        0 -> js_bytes_response(status, headers, bits)
+        _ ->
+          to_js_response(
+            response.new(500)
+            |> string_body("Response body is not a whole number of bytes"),
+          )
+      }
+    Stream(stream) -> js_stream_response(status, headers, stream)
+    Empty -> js_empty_response(status, headers)
+  }
+}
+
+//
+// Env & Context
+//
+
+/// Get a string environment variable or secret from the Worker's bindings.
+///
+/// Returns an error if there is no binding with that name, or if the binding
+/// is not a string (for example a KV namespace).
+///
+/// # Examples
+///
+/// ```gleam
+/// case workers.env_var(env, "API_TOKEN") {
+///   Ok(token) -> todo
+///   Error(_) -> workers.internal_server_error() |> promise.resolve
+/// }
+/// ```
+///
+@external(javascript, "./env_ffi.mts", "envVar")
+pub fn env_var(env: Env, name: String) -> Result(String, Nil)
+
+/// Get any binding from the Worker's environment as a dynamic value.
+///
+/// This is an escape hatch for bindings that `rays` does not yet provide
+/// typed APIs for.
+///
+@external(javascript, "./env_ffi.mts", "envBinding")
+pub fn env_binding(env: Env, name: String) -> Result(Dynamic, Nil)
+
+/// Extend the lifetime of the Worker until the given promise settles, without
+/// delaying the response. Useful for logging, analytics, or cache writes.
+///
+@external(javascript, "./env_ffi.mts", "waitUntil")
+pub fn wait_until(ctx: Context, promise: Promise(a)) -> Nil
+
+/// If the Worker throws an unhandled exception, forward the request to the
+/// origin server instead of returning an error page.
+///
+@external(javascript, "./env_ffi.mts", "passThroughOnException")
+pub fn pass_through_on_exception(ctx: Context) -> Nil
+
+//
+// Requests
+//
+
+/// The body of an incoming request.
+///
+/// The body is not read until one of the body reading functions such as
+/// `read_body_bits` or `require_string_body` is called. A body can only be
+/// read once.
+///
+pub opaque type RequestBody {
+  RequestBody(raw: JsRequest)
+}
+
+/// An incoming HTTP request.
+///
+pub type Request =
+  HttpRequest(RequestBody)
+
+/// A streaming body, such as an incoming request body or the body of a
+/// response from `fetch`.
+///
+pub type ReadableStream
+
+/// An error that can occur when reading a request body.
+///
+pub type BodyError {
+  /// The body has already been read by an earlier call.
+  BodyAlreadyRead
+  /// The body could not be read from the client.
+  BodyReadFailed
+  /// The body was read but is not valid UTF-8.
+  InvalidUtf8
+}
+
+/// Split the request path into its segments.
+///
+/// # Examples
+///
+/// ```gleam
+/// // GET /users/123
+/// workers.path_segments(request)
+/// // -> ["users", "123"]
+/// ```
+///
+pub fn path_segments(request: Request) -> List(String) {
+  request.path_segments(request)
+}
+
+/// Get the query parameters of the request. Returns an empty list if the
+/// query string is missing or malformed.
+///
+pub fn get_query(request: Request) -> List(#(String, String)) {
+  request.get_query(request)
+  |> result.unwrap([])
+}
+
+/// Get Cloudflare's `cf` properties for the request, such as the client's
+/// country, the data centre that handled the request, and TLS details.
+///
+/// Returns an error when running outside Cloudflare, for example in tests.
+///
+pub fn cf_properties(request: Request) -> Result(Dynamic, Nil) {
+  js_request_cf(request.body.raw)
+}
+
+/// Get the request body as a stream, without reading it into memory.
+///
+/// Returns an error if the request has no body or it has already been read.
+///
+pub fn body_stream(request: Request) -> Result(ReadableStream, Nil) {
+  js_request_body_stream(request.body.raw)
+}
+
+/// Read the entire request body as a bit array.
+///
+pub fn read_body_bits(
+  request: Request,
+) -> Promise(Result(BitArray, BodyError)) {
+  use result <- promise.map(js_read_bytes(request.body.raw))
+  result.map_error(result, body_error_from_tag)
+}
+
+/// Read the entire request body as a UTF-8 string.
+///
+pub fn read_body_string(
+  request: Request,
+) -> Promise(Result(String, BodyError)) {
+  use result <- promise.map(read_body_bits(request))
+  use bits <- result.try(result)
+  bit_array.to_string(bits) |> result.replace_error(InvalidUtf8)
+}
+
+fn body_error_from_tag(tag: String) -> BodyError {
+  case tag {
+    "already_read" -> BodyAlreadyRead
+    _ -> BodyReadFailed
+  }
+}
+
+fn body_error_response(error: BodyError) -> Response {
+  case error {
+    BodyAlreadyRead -> internal_server_error()
+    BodyReadFailed -> bad_request("Could not read body")
+    InvalidUtf8 -> bad_request("Invalid UTF-8")
+  }
+}
+
+//
+// Middleware
+//
+
+/// Ensure the request has the given method, responding with 405: Method not
+/// allowed otherwise.
+///
+/// # Examples
+///
+/// ```gleam
+/// use <- workers.require_method(req, http.Post)
+/// ```
+///
+pub fn require_method(
+  request: HttpRequest(body),
+  method: Method,
+  next: fn() -> Promise(Response),
+) -> Promise(Response) {
+  case request.method == method {
+    True -> next()
+    False -> promise.resolve(method_not_allowed(allowed: [method]))
+  }
+}
+
+/// Ensure the request has the given content type, responding with 415:
+/// Unsupported media type otherwise. Parameters such as `; charset=utf-8` are
+/// ignored.
+///
+pub fn require_content_type(
+  request: HttpRequest(body),
+  expected: String,
+  next: fn() -> Promise(Response),
+) -> Promise(Response) {
+  let content_type =
+    request.get_header(request, "content-type")
+    |> result.map(fn(value) {
+      case string.split_once(value, ";") {
+        Ok(#(media_type, _)) -> media_type
+        Error(_) -> value
+      }
+      |> string.trim
+      |> string.lowercase
+    })
+  case content_type == Ok(expected) {
+    True -> next()
+    False -> promise.resolve(unsupported_media_type(accept: [expected]))
+  }
+}
+
+/// Read the request body as a bit array.
+///
+/// Responds with 400: Bad request if the body cannot be read.
+///
+pub fn require_bit_array_body(
+  request: Request,
+  next: fn(BitArray) -> Promise(Response),
+) -> Promise(Response) {
+  use result <- promise.await(read_body_bits(request))
+  case result {
+    Ok(bits) -> next(bits)
+    Error(error) -> promise.resolve(body_error_response(error))
+  }
+}
+
+/// Read the request body as a UTF-8 string.
+///
+/// Responds with 400: Bad request if the body cannot be read or is not valid
+/// UTF-8.
+///
+/// # Examples
+///
+/// ```gleam
+/// use body <- workers.require_string_body(req)
+/// ```
+///
+pub fn require_string_body(
+  request: Request,
+  next: fn(String) -> Promise(Response),
+) -> Promise(Response) {
+  use result <- promise.await(read_body_string(request))
+  case result {
+    Ok(body) -> next(body)
+    Error(error) -> promise.resolve(body_error_response(error))
+  }
+}
+
+/// Read the request body as JSON, returning a dynamic value to be decoded.
+///
+/// Responds with 415: Unsupported media type if the content type is not
+/// `application/json`, and with 400: Bad request if the body is not valid
+/// JSON.
+///
+/// # Examples
+///
+/// ```gleam
+/// use json <- workers.require_json(req)
+/// case decode.run(json, person_decoder()) {
+///   Ok(person) -> todo
+///   Error(_) -> workers.unprocessable_content() |> promise.resolve
+/// }
+/// ```
+///
+pub fn require_json(
+  request: Request,
+  next: fn(Dynamic) -> Promise(Response),
+) -> Promise(Response) {
+  use <- require_content_type(request, "application/json")
+  use body <- require_string_body(request)
+  case json.parse(body, decode.dynamic) {
+    Ok(json) -> next(json)
+    Error(_) -> promise.resolve(bad_request("Invalid JSON"))
+  }
+}
+
+/// Read a `application/x-www-form-urlencoded` request body as a list of
+/// key-value pairs, sorted by key.
+///
+/// Responds with 415: Unsupported media type for any other content type, and
+/// with 400: Bad request if the body is not a valid form encoding.
+///
+/// Multipart form bodies are not yet supported.
+///
+pub fn require_form(
+  request: Request,
+  next: fn(List(#(String, String))) -> Promise(Response),
+) -> Promise(Response) {
+  use <- require_content_type(request, "application/x-www-form-urlencoded")
+  use body <- require_string_body(request)
+  case uri.parse_query(body) {
+    Ok(pairs) -> next(list.sort(pairs, fn(a, b) { string.compare(a.0, b.0) }))
+    Error(_) -> promise.resolve(bad_request("Invalid form encoding"))
+  }
+}
+
+//
+// Responses
+//
+
+/// The body of an HTTP response.
+///
+pub type Body {
+  /// A body of UTF-8 text.
+  Text(String)
+  /// A body of binary data.
+  Bytes(BitArray)
+  /// A streaming body, passed through to the client without buffering.
+  Stream(ReadableStream)
+  /// No body.
+  Empty
+}
+
+/// An HTTP response.
+///
+pub type Response =
+  HttpResponse(Body)
+
+const content_text = #("content-type", "text/plain; charset=utf-8")
+
+/// Create a response with the given status code and no body.
+///
+pub fn response(status: Int) -> Response {
+  Response(status, [], Empty)
+}
+
+/// Set the body of a response.
+///
+pub fn set_body(response: HttpResponse(a), body: Body) -> Response {
+  response.set_body(response, body)
+}
+
+/// Set a header on a response, replacing any existing header with the same
+/// name.
+///
+pub fn set_header(
+  response: HttpResponse(a),
+  name: String,
+  value: String,
+) -> HttpResponse(a) {
+  response.set_header(response, name, value)
+}
+
+/// Set the body of a response to the given text. The content type is not
+/// changed.
+///
+pub fn string_body(response: HttpResponse(a), content: String) -> Response {
+  response.set_body(response, Text(content))
+}
+
+/// Set the body of a response to the given binary data. The content type is
+/// not changed.
+///
+pub fn bit_array_body(
+  response: HttpResponse(a),
+  content: BitArray,
+) -> Response {
+  response.set_body(response, Bytes(content))
+}
+
+/// Set the body of a response to a stream. The content type is not changed.
+///
+pub fn stream_body(
+  response: HttpResponse(a),
+  stream: ReadableStream,
+) -> Response {
+  response.set_body(response, Stream(stream))
+}
+
+/// Set the body of a response to the given HTML, and set the content type to
+/// `text/html`.
+///
+pub fn html_body(response: HttpResponse(a), html: String) -> Response {
+  response
+  |> response.set_body(Text(html))
+  |> response.set_header("content-type", "text/html; charset=utf-8")
+}
+
+/// Set the body of a response to the given JSON, and set the content type to
+/// `application/json`.
+///
+pub fn json_body(response: HttpResponse(a), json: String) -> Response {
+  response
+  |> response.set_body(Text(json))
+  |> response.set_header("content-type", "application/json; charset=utf-8")
+}
+
+/// Create an HTML response with the given status code.
+///
+pub fn html_response(html: String, status: Int) -> Response {
+  response(status) |> html_body(html)
+}
+
+/// Create a JSON response with the given status code.
+///
+pub fn json_response(json: String, status: Int) -> Response {
+  response(status) |> json_body(json)
+}
+
+/// A 200: OK response.
+///
+pub fn ok() -> Response {
+  Response(200, [content_text], Text("OK"))
+}
+
+/// A 201: Created response.
+///
+pub fn created() -> Response {
+  Response(201, [content_text], Text("Created"))
+}
+
+/// A 202: Accepted response.
+///
+pub fn accepted() -> Response {
+  Response(202, [content_text], Text("Accepted"))
+}
+
+/// A 204: No content response.
+///
+pub fn no_content() -> Response {
+  Response(204, [], Empty)
+}
+
+/// A 303: See other response, redirecting the client to the given URL with a
+/// GET request.
+///
+pub fn redirect(to url: String) -> Response {
+  Response(
+    303,
+    [#("location", url), content_text],
+    Text("You are being redirected: " <> url),
+  )
+}
+
+/// A 308: Permanent redirect response.
+///
+pub fn permanent_redirect(to url: String) -> Response {
+  Response(
+    308,
+    [#("location", url), content_text],
+    Text("You are being redirected: " <> url),
+  )
+}
+
+/// A 400: Bad request response. The detail is included in the body if it is
+/// not empty.
+///
+pub fn bad_request(detail: String) -> Response {
+  let body = case detail {
+    "" -> "Bad request"
+    _ -> "Bad request: " <> detail
+  }
+  Response(400, [content_text], Text(body))
+}
+
+/// A 404: Not found response.
+///
+pub fn not_found() -> Response {
+  Response(404, [content_text], Text("Not found"))
+}
+
+/// A 405: Method not allowed response, listing the allowed methods.
+///
+pub fn method_not_allowed(allowed methods: List(Method)) -> Response {
+  let allowed =
+    methods
+    |> list.map(http.method_to_string)
+    |> list.map(string.uppercase)
+    |> list.sort(string.compare)
+    |> string.join(", ")
+  Response(405, [#("allow", allowed), content_text], Text("Method not allowed"))
+}
+
+/// A 413: Content too large response.
+///
+pub fn content_too_large() -> Response {
+  Response(413, [content_text], Text("Content too large"))
+}
+
+/// A 415: Unsupported media type response, listing the accepted media types.
+///
+pub fn unsupported_media_type(accept acceptable: List(String)) -> Response {
+  Response(
+    415,
+    [#("accept", string.join(acceptable, ", ")), content_text],
+    Text("Unsupported media type"),
+  )
+}
+
+/// A 422: Unprocessable content response.
+///
+pub fn unprocessable_content() -> Response {
+  Response(422, [content_text], Text("Unprocessable content"))
+}
+
+/// A 500: Internal server error response.
+///
+pub fn internal_server_error() -> Response {
+  Response(500, [content_text], Text("Internal server error"))
+}
+
+//
+// FFI
+//
+
+@external(javascript, "./workers_ffi.mts", "makeWorker")
+fn make_worker(
+  fetch: fn(JsRequest, Env, Context) -> Promise(JsResponse),
+) -> Worker
+
+@external(javascript, "./fetch_ffi.mts", "requestMethod")
+fn js_request_method(request: JsRequest) -> String
+
+@external(javascript, "./fetch_ffi.mts", "requestUrl")
+fn js_request_url(request: JsRequest) -> String
+
+@external(javascript, "./fetch_ffi.mts", "requestHeaders")
+fn js_request_headers(request: JsRequest) -> Array(#(String, String))
+
+@external(javascript, "./workers_ffi.mts", "requestCf")
+fn js_request_cf(request: JsRequest) -> Result(Dynamic, Nil)
+
+@external(javascript, "./fetch_ffi.mts", "requestBodyStream")
+fn js_request_body_stream(request: JsRequest) -> Result(ReadableStream, Nil)
+
+@external(javascript, "./fetch_ffi.mts", "readBytes")
+fn js_read_bytes(request: JsRequest) -> Promise(Result(BitArray, String))
+
+@external(javascript, "./fetch_ffi.mts", "textResponse")
+fn js_text_response(
+  status: Int,
+  headers: Array(#(String, String)),
+  body: String,
+) -> JsResponse
+
+@external(javascript, "./fetch_ffi.mts", "bytesResponse")
+fn js_bytes_response(
+  status: Int,
+  headers: Array(#(String, String)),
+  body: BitArray,
+) -> JsResponse
+
+@external(javascript, "./fetch_ffi.mts", "streamResponse")
+fn js_stream_response(
+  status: Int,
+  headers: Array(#(String, String)),
+  body: ReadableStream,
+) -> JsResponse
+
+@external(javascript, "./fetch_ffi.mts", "emptyResponse")
+fn js_empty_response(
+  status: Int,
+  headers: Array(#(String, String)),
+) -> JsResponse
