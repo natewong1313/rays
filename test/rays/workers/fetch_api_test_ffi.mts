@@ -1,18 +1,32 @@
 // Drive a Worker through the real Fetch API `Request` and `Response` classes,
 // the same way the Workers runtime does.
 
-import { Result$Error, Result$Ok } from "../gleam.mjs";
-import type { Result } from "../gleam.mjs";
-import type { Header } from "../rays/workers_ffi.mts";
-import type { SimulatedContext } from "../rays/workers/simulate_ffi.mts";
+import {
+  Result$Error,
+  Result$Error$0,
+  Result$Ok,
+  Result$isError,
+} from "../../gleam.mjs";
+import type { Result } from "../../gleam.mjs";
+import type { Header } from "../workers_ffi.mts";
+import type { SimulatedContext } from "./simulate_ffi.mts";
+import { context, waitForBackground } from "./simulate_ffi.mts";
 
-// Called without `body` for requests that have none, as the Fetch API
-// forbids a body on `GET` requests.
 export function request(
   method: string,
   url: string,
   headers: Header[],
-  body?: string,
+): Request {
+  return new Request(url, { method, headers });
+}
+
+// The Fetch API forbids a body on some requests, such as `GET`, so a body is
+// only given where the caller wants one.
+export function requestWithBody(
+  method: string,
+  url: string,
+  headers: Header[],
+  body: string,
 ): Request {
   return new Request(url, { method, headers, body });
 }
@@ -40,15 +54,18 @@ export async function run(
   worker: TestableWorker,
   request: Request,
 ): Promise<[Response, number, boolean]> {
-  const waited: Promise<unknown>[] = [];
-  let passedThrough = false;
-  const ctx: SimulatedContext = {
-    waitUntil: (promise) => void waited.push(promise),
-    passThroughOnException: () => void (passedThrough = true),
-  };
-  const response = await worker.fetch(request, {}, ctx);
-  await Promise.all(waited);
-  return [response, waited.length, passedThrough];
+  const ctx = context();
+  let response: Response;
+  try {
+    response = await worker.fetch(request, {}, ctx);
+  } catch (error) {
+    // Drain even after handler failure, preserving that failure as primary.
+    await waitForBackground(ctx);
+    throw error;
+  }
+  const background = await waitForBackground(ctx);
+  if (Result$isError(background)) throw Result$Error$0(background);
+  return [response, ctx.waited, ctx.passedThrough];
 }
 
 export function status(response: Response): number {

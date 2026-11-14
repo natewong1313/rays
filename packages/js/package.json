@@ -1,0 +1,35 @@
+{
+  "name": "@rays/cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JavaScript helpers for using rays Workers alongside TypeScript Workers.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.test.json"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "*"
+  },
+  "peerDependenciesMeta": {
+    "@cloudflare/workers-types": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

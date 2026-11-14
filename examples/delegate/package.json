@@ -1,0 +1,20 @@
+{
+  "name": "delegate-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types",
+    "typecheck": "gleam build && wrangler types --check && tsc -p tsconfig.json",
+    "test": "gleam build && vitest run"
+  },
+  "dependencies": {
+    "@rays/cloudflare": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

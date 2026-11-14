@@ -1,0 +1,13 @@
+{
+  // The Gleam Worker. It serves /api/, and asks the TypeScript Worker who
+  // the user is.
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "rays-side-by-side-api",
+  "main": "index.ts",
+  "compatibility_date": "2026-09-01",
+  "build": {
+    "command": "gleam build",
+    "watch_dir": "src"
+  },
+  "services": [{ "binding": "WEB", "service": "rays-side-by-side-web" }]
+}

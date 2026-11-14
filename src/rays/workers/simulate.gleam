@@ -15,19 +15,24 @@
 ////     simulate.request(http.Post, "/people")
 ////     |> simulate.json_body(json.object([#("name", json.string("Joe"))]))
 ////   let env = simulate.env() |> simulate.env_var("GREETING", "Hello")
+////   let ctx = simulate.context()
 ////
-////   use response <- promise.map(
-////     app.handle_request(request, env, simulate.context()),
+////   use response <- promise.await(
+////     app.handle_request(request, env, ctx),
 ////   )
+////   use background <- promise.map(simulate.wait_for_background(ctx))
 ////   assert response.status == 201
+////   assert background == Ok(Nil)
 ////   assert simulate.read_body(response) == "{\"name\":\"Joe\"}"
 //// }
 //// ```
 ////
-//// This module only builds values of the types defined by `rays`. It does
-//// not emulate Cloudflare services: there are no fake KV namespaces or D1
-//// databases, and `context` ignores `wait_until`. To test against real
-//// bindings, use Cloudflare's
+//// Simulated contexts track background work registered with `wait_until`.
+//// Await `wait_for_background` before asserting on its effects or finishing
+//// a test. Calls to other Workers can be faked with `with_service`, but this
+//// module does not otherwise emulate Cloudflare services: there are no fake
+//// KV namespaces or D1 databases. To test against real bindings, use
+//// Cloudflare's
 //// [Vitest integration](https://developers.cloudflare.com/workers/testing/vitest-integration/)
 //// or [test harness](https://developers.cloudflare.com/workers/testing/test-harness/),
 //// which run the compiled Worker in the Workers runtime.
@@ -36,6 +41,7 @@ import gleam/bit_array
 import gleam/dynamic.{type Dynamic}
 import gleam/http.{type Method}
 import gleam/http/request
+import gleam/javascript/promise.{type Promise}
 import gleam/json.{type Json}
 import gleam/option.{None, Some}
 import gleam/string
@@ -97,7 +103,7 @@ pub fn string_body(request: Request, body: String) -> Request {
 /// Panics if the bit array is not a whole number of bytes.
 ///
 pub fn bit_array_body(request: Request, body: BitArray) -> Request {
-  assert is_whole_bytes(body)
+  assert workers.is_whole_bytes(body)
     as "simulate.bit_array_body requires a whole number of bytes"
   request.set_body(request, workers.request_body(js_bytes_request(body)))
 }
@@ -167,7 +173,7 @@ pub fn read_body_bits(response: Response) -> BitArray {
   case response.body {
     workers.Text(text) -> bit_array.from_string(text)
     workers.Bytes(bits) -> {
-      assert is_whole_bytes(bits)
+      assert workers.is_whole_bytes(bits)
         as "simulate.read_body_bits requires a whole number of bytes"
       bits
     }
@@ -175,10 +181,6 @@ pub fn read_body_bits(response: Response) -> BitArray {
     workers.Stream(_) ->
       panic as "simulate.read_body_bits cannot read a stream body"
   }
-}
-
-fn is_whole_bytes(bits: BitArray) -> Bool {
-  bit_array.bit_size(bits) % 8 == 0
 }
 
 //
@@ -209,8 +211,62 @@ pub fn env_var(env: Env, name: String, value: String) -> Env {
 @external(javascript, "./simulate_ffi.mts", "envWith")
 pub fn env_binding(env: Env, name: String, value: Dynamic) -> Env
 
-/// Create an execution context. `wait_until` and `pass_through_on_exception`
-/// do nothing.
+/// Add a fake service binding to the environment. Requests sent to it with
+/// `rays/fetch` are handled by the given function, as if by another Worker.
+///
+/// The request goes through the same conversion as a real request to a
+/// Worker, so the handler receives an ordinary `Request`, together with the
+/// given context. Background work the fake registers with `wait_until` is
+/// waited for by `wait_for_background` on that context, mirroring how the
+/// Workers runtime ties a bound Worker's background work to the caller's
+/// request.
+///
+/// # Examples
+///
+/// ```gleam
+/// let ctx = simulate.context()
+/// let env =
+///   simulate.env()
+///   |> simulate.with_service("AUTH", ctx, fn(_request, _ctx) {
+///     workers.ok() |> workers.string_body("joe") |> promise.resolve
+///   })
+/// ```
+///
+pub fn with_service(
+  env: Env,
+  name: String,
+  context: Context,
+  handler: fn(Request, Context) -> Promise(Response),
+) -> Env {
+  let worker =
+    workers.new(fn(request: Request, _env: Env, ctx: Context) {
+      handler(request, ctx)
+    })
+  js_env_with_service(env, name, worker, context)
+}
+
+@external(javascript, "./simulate_ffi.mts", "envWithService")
+fn js_env_with_service(
+  env: Env,
+  name: String,
+  worker: workers.Worker,
+  context: Context,
+) -> Env
+
+/// Create an execution context that tracks work registered with `wait_until`.
+/// Await `wait_for_background` before finishing a test to observe its completion
+/// and failures. `pass_through_on_exception` does not forward requests.
 ///
 @external(javascript, "./simulate_ffi.mts", "context")
 pub fn context() -> Context
+
+/// Wait for background work registered on a context created by `context`.
+/// This includes work registered by other background tasks while waiting.
+///
+/// Resolves to `Error` with the first observed native rejection, after all
+/// registered work has settled. A fulfilled `Error` is a value, not a
+/// rejection. This does not cancel tasks or impose a timeout, and cannot
+/// wait for work registered after all tracked tasks have finished.
+///
+@external(javascript, "./simulate_ffi.mts", "waitForBackground")
+pub fn wait_for_background(ctx: Context) -> Promise(Result(Nil, Dynamic))

@@ -51,7 +51,10 @@ import gleam/uri
 /// Worker's entry module.
 ///
 /// At runtime this is the `ExportedHandler` object Cloudflare expects, with a
-/// `fetch` method.
+/// `fetch` method, so a JavaScript entry module can `export default main()`.
+/// It also has a `Symbol.for("rays.worker")` property set to `true`, which
+/// `handler()` from the `@rays/cloudflare` npm package checks for. Both are
+/// stable parts of the runtime shape.
 ///
 pub type Worker
 
@@ -137,9 +140,9 @@ fn to_js_response(response: Response) -> JsResponse {
     _, Text(text) -> js_text_response(status, headers, text)
     _, Stream(stream) -> js_stream_response(status, headers, stream)
     _, Bytes(bits) ->
-      case bit_array.bit_size(bits) % 8 {
-        0 -> js_bytes_response(status, headers, bits)
-        _ -> to_js_response(internal_server_error())
+      case is_whole_bytes(bits) {
+        True -> js_bytes_response(status, headers, bits)
+        False -> to_js_response(internal_server_error())
       }
   }
 }
@@ -224,7 +227,8 @@ pub type Request =
 ///
 pub type ReadableStream
 
-/// An error that can occur when reading a request body.
+/// An error that can occur when reading the body of an incoming request, or
+/// of a response received with `rays/fetch`.
 ///
 pub type BodyError {
   /// The body has already been read by an earlier call.
@@ -279,6 +283,30 @@ pub fn body_stream(request: Request) -> Result(ReadableStream, BodyError) {
   }
 }
 
+/// Type the result of reading a body that has not been read already: the
+/// runtime's failure message becomes `BodyReadFailed`. Used by `rays/fetch`
+/// for the bodies of responses it receives.
+///
+@internal
+pub fn body_read(
+  read: Promise(Result(BitArray, String)),
+) -> Promise(Result(BitArray, BodyError)) {
+  read |> promise.map(result.map_error(_, BodyReadFailed))
+}
+
+/// Type the result of reading a body as UTF-8: invalid bytes become
+/// `InvalidUtf8`. Used by `rays/fetch` for the bodies of responses it
+/// receives.
+///
+@internal
+pub fn body_string(
+  read: Promise(Result(BitArray, BodyError)),
+) -> Promise(Result(String, BodyError)) {
+  use bits <- promise.map(read)
+  use bits <- result.try(bits)
+  bit_array.to_string(bits) |> result.replace_error(InvalidUtf8)
+}
+
 /// Read the entire request body as a bit array. A request without a body
 /// gives an empty bit array.
 ///
@@ -290,9 +318,7 @@ pub fn read_body_bits(
 ) -> Promise(Result(BitArray, BodyError)) {
   case js_body_used(request.body.raw) {
     True -> promise.resolve(Error(BodyAlreadyRead))
-    False ->
-      js_read_bytes(request.body.raw)
-      |> promise.map(result.map_error(_, BodyReadFailed))
+    False -> body_read(js_read_bytes(request.body.raw))
   }
 }
 
@@ -304,9 +330,7 @@ pub fn read_body_bits(
 pub fn read_body_string(
   request: Request,
 ) -> Promise(Result(String, BodyError)) {
-  use result <- promise.map(read_body_bits(request))
-  use bits <- result.try(result)
-  bit_array.to_string(bits) |> result.replace_error(InvalidUtf8)
+  body_string(read_body_bits(request))
 }
 
 fn body_error_response(error: BodyError) -> Response {
@@ -352,9 +376,11 @@ pub fn require_content_type(
   expected: String,
   next: fn() -> Promise(Response),
 ) -> Promise(Response) {
-  let content_type =
-    request.get_header(request, "content-type") |> result.map(media_type)
-  case content_type == Ok(media_type(expected)) {
+  let matches = case request.get_header(request, "content-type") {
+    Ok(content_type) -> media_type(content_type) == media_type(expected)
+    Error(_) -> False
+  }
+  case matches {
     True -> next()
     False -> promise.resolve(unsupported_media_type(accept: [expected]))
   }
@@ -417,8 +443,8 @@ pub fn require_string_body(
 /// # Examples
 ///
 /// ```gleam
-/// use json <- workers.require_json(req)
-/// case decode.run(json, person_decoder()) {
+/// use value <- workers.require_json(req)
+/// case decode.run(value, person_decoder()) {
 ///   Ok(person) -> todo
 ///   Error(_) -> workers.unprocessable_content() |> promise.resolve
 /// }
@@ -431,7 +457,7 @@ pub fn require_json(
   use <- require_content_type(request, "application/json")
   use body <- require_string_body(request)
   case json.parse(body, decode.dynamic) {
-    Ok(json) -> next(json)
+    Ok(value) -> next(value)
     Error(_) -> promise.resolve(bad_request("Invalid JSON"))
   }
 }
@@ -475,6 +501,15 @@ pub type Body {
   Stream(ReadableStream)
   /// No body.
   Empty
+}
+
+/// Whether the bit array is a whole number of bytes, as the Fetch API
+/// requires of a binary body. Used by `rays/fetch` and `rays/workers/simulate`
+/// as well.
+///
+@internal
+pub fn is_whole_bytes(bits: BitArray) -> Bool {
+  bit_array.bit_size(bits) % 8 == 0
 }
 
 /// An HTTP response.

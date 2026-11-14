@@ -1,0 +1,20 @@
+{
+  "name": "side-by-side-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev -c web/wrangler.jsonc -c api/wrangler.jsonc",
+    "deploy": "wrangler deploy -c api/wrangler.jsonc && wrangler deploy -c web/wrangler.jsonc",
+    "typecheck": "(cd api && gleam build) && tsc -p tsconfig.json",
+    "test": "(cd api && gleam test) && vitest run"
+  },
+  "dependencies": {
+    "@rays/cloudflare": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

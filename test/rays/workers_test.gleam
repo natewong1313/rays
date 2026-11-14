@@ -1,7 +1,7 @@
 //// Tests for handler-facing behaviour: middleware, body reading, response
 //// helpers, and env. These use `simulate` and assert on Gleam values
 //// directly. The conversion to and from the Fetch API is tested in
-//// `workers_fetch_test`.
+//// `rays/workers/fetch_api_test`.
 
 import gleam/dynamic
 import gleam/dynamic/decode
@@ -135,8 +135,8 @@ pub fn require_bit_array_body_test() {
 }
 
 fn name_from_json(request: Request) -> Promise(Response) {
-  use json <- workers.require_json(request)
-  case decode.run(json, decode.at(["name"], decode.string)) {
+  use value <- workers.require_json(request)
+  case decode.run(value, decode.at(["name"], decode.string)) {
     Ok(name) -> workers.ok() |> workers.string_body(name)
     Error(_) -> workers.unprocessable_content()
   }

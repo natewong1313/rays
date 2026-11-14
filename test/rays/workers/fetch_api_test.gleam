@@ -14,14 +14,14 @@ type JsRequest
 
 type JsResponse
 
-@external(javascript, "./workers_fetch_test_ffi.mts", "request")
+@external(javascript, "./fetch_api_test_ffi.mts", "request")
 fn js_request(
   method: String,
   url: String,
   headers: Array(#(String, String)),
 ) -> JsRequest
 
-@external(javascript, "./workers_fetch_test_ffi.mts", "request")
+@external(javascript, "./fetch_api_test_ffi.mts", "requestWithBody")
 fn js_request_with_body(
   method: String,
   url: String,
@@ -29,28 +29,28 @@ fn js_request_with_body(
   body: String,
 ) -> JsRequest
 
-@external(javascript, "./workers_fetch_test_ffi.mts", "failingBodyRequest")
+@external(javascript, "./fetch_api_test_ffi.mts", "failingBodyRequest")
 fn js_failing_body_request(url: String) -> JsRequest
 
-@external(javascript, "./workers_fetch_test_ffi.mts", "run")
+@external(javascript, "./fetch_api_test_ffi.mts", "run")
 fn js_run(
   worker: workers.Worker,
   request: JsRequest,
 ) -> Promise(#(JsResponse, Int, Bool))
 
-@external(javascript, "./workers_fetch_test_ffi.mts", "status")
+@external(javascript, "./fetch_api_test_ffi.mts", "status")
 fn status(response: JsResponse) -> Int
 
-@external(javascript, "./workers_fetch_test_ffi.mts", "header")
+@external(javascript, "./fetch_api_test_ffi.mts", "header")
 fn header(response: JsResponse, name: String) -> Result(String, Nil)
 
-@external(javascript, "./workers_fetch_test_ffi.mts", "setCookies")
+@external(javascript, "./fetch_api_test_ffi.mts", "setCookies")
 fn set_cookies(response: JsResponse) -> Array(String)
 
-@external(javascript, "./workers_fetch_test_ffi.mts", "hasBody")
+@external(javascript, "./fetch_api_test_ffi.mts", "hasBody")
 fn has_body(response: JsResponse) -> Bool
 
-@external(javascript, "./workers_fetch_test_ffi.mts", "text")
+@external(javascript, "./fetch_api_test_ffi.mts", "text")
 fn text(response: JsResponse) -> Promise(String)
 
 /// What the runtime observed after a Worker handled a request.

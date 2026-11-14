@@ -49,10 +49,19 @@ pub fn read_body_bits_test() {
   assert simulate.read_body_bits(workers.no_content()) == <<>>
 }
 
-pub fn context_ignores_calls_test() {
+pub fn context_tracks_background_work_test() {
   let ctx = simulate.context()
   workers.wait_until(ctx, promise.resolve(Nil))
   workers.pass_through_on_exception(ctx)
+  use result <- promise.map(simulate.wait_for_background(ctx))
+  assert result == Ok(Nil)
+}
+
+pub fn context_treats_fulfilled_errors_as_values_test() {
+  let ctx = simulate.context()
+  workers.wait_until(ctx, promise.resolve(Error("expected failure")))
+  use result <- promise.map(simulate.wait_for_background(ctx))
+  assert result == Ok(Nil)
 }
 
 pub fn response_header_helpers_test() {

@@ -1,0 +1,5 @@
+/node_modules
+/.wrangler
+api/build
+web/.wrangler
+api/.wrangler

@@ -17,11 +17,16 @@ export type Env = Record<string, unknown>;
 
 export type Header = [string, string];
 
+// Marks every Worker built by `rays/workers`, so JavaScript helpers such as
+// `handler()` in `@rays/cloudflare` can tell a Worker from other values. The
+// brand is part of the documented runtime shape of a `Worker`.
+const WORKER_BRAND = Symbol.for("rays.worker");
+
+export type Worker = ExportedHandler<Env> & { readonly [WORKER_BRAND]: true };
+
 // `ExportedHandler` and others are from `@cloudflare/workers-types`.
-export function makeWorker(
-  fetch: ExportedHandlerFetchHandler<Env>,
-): ExportedHandler<Env> {
-  return { fetch };
+export function makeWorker(fetch: ExportedHandlerFetchHandler<Env>): Worker {
+  return { fetch, [WORKER_BRAND]: true };
 }
 
 // The bytes of an aligned bit array, without copying.
@@ -82,16 +87,32 @@ export function bodyStream(request: Request): ReadableStream {
   return request.body ?? new ReadableStream({ start: (c) => c.close() });
 }
 
-// Resolves to the error's message if the body cannot be read.
-export async function readBytes(
-  request: Request,
-): Promise<Result<BitArray, string>> {
+// The name and message of a thrown error, for `rays/fetch` to classify send
+// failures by name. `fallback` is the message when neither can be read, for
+// example because the error's `message` getter throws.
+export function describeError(
+  error: unknown,
+  fallback: string,
+): [string, string] {
   try {
-    const buffer = await request.arrayBuffer();
-    return Result$Ok(BitArray$BitArray(new Uint8Array(buffer)));
-  } catch (error) {
-    return Result$Error(error instanceof Error ? error.message : String(error));
+    return error instanceof Error
+      ? [String(error.name), String(error.message)]
+      : ["", String(error)];
+  } catch {
+    return ["", fallback];
   }
+}
+
+// Resolves to the error's message if the body cannot be read. Used for
+// incoming request bodies and, by `rays/fetch`, for response bodies.
+export async function readBytes(body: Body): Promise<Result<BitArray, string>> {
+  let buffer: ArrayBuffer;
+  try {
+    buffer = await body.arrayBuffer();
+  } catch (error) {
+    return Result$Error(describeError(error, "Unknown body read error")[1]);
+  }
+  return Result$Ok(BitArray$BitArray(new Uint8Array(buffer)));
 }
 
 // Responses

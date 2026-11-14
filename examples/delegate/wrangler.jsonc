@@ -1,0 +1,10 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "rays-delegate-example",
+  "main": "index.ts",
+  "compatibility_date": "2026-09-01",
+  "build": {
+    "command": "gleam build",
+    "watch_dir": "src"
+  }
+}

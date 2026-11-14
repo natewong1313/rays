@@ -57,8 +57,8 @@ fn person_decoder() -> decode.Decoder(Person) {
 // POST /people with a JSON body like {"name": "Joe", "is_cool": true}
 fn create_person(req: Request) -> Promise(Response) {
   use <- workers.require_method(req, Post)
-  use json <- workers.require_json(req)
-  case decode.run(json, person_decoder()) {
+  use value <- workers.require_json(req)
+  case decode.run(value, person_decoder()) {
     Ok(person) ->
       json.object([
         #("name", json.string(person.name)),
