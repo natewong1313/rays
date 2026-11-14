@@ -3,16 +3,29 @@
 
 import { Result$Error, Result$Ok } from "../gleam.mjs";
 import type { Result } from "../gleam.mjs";
-import type { Header } from "../rays/fetch_ffi.mts";
+import type { Header } from "../rays/workers_ffi.mts";
 import type { SimulatedContext } from "../rays/workers/simulate_ffi.mts";
 
+// Called without `body` for requests that have none, as the Fetch API
+// forbids a body on `GET` requests.
 export function request(
   method: string,
   url: string,
   headers: Header[],
-  body: string,
+  body?: string,
 ): Request {
-  return new Request(url, { method, headers, body: body === "" ? null : body });
+  return new Request(url, { method, headers, body });
+}
+
+// A `POST` request whose body stream fails when read.
+export function failingBodyRequest(url: string): Request {
+  const body = new ReadableStream({
+    pull: (controller) => controller.error(new Error("connection lost")),
+  });
+  // Node requires `duplex` for stream bodies; Cloudflare's `RequestInit` type
+  // lacks it, so the init is not written inline as an object literal.
+  const init = { method: "POST", body, duplex: "half" };
+  return new Request(url, init);
 }
 
 type TestableWorker = {

@@ -65,7 +65,6 @@ fn create_person(req: Request) -> Promise(Response) {
         #("is_cool", json.bool(person.is_cool)),
         #("saved", json.bool(True)),
       ])
-      |> json.to_string
       |> workers.json_response(201)
     Error(_) -> workers.unprocessable_content()
   }

@@ -97,7 +97,7 @@ pub fn string_body(request: Request, body: String) -> Request {
 /// Panics if the bit array is not a whole number of bytes.
 ///
 pub fn bit_array_body(request: Request, body: BitArray) -> Request {
-  let assert 0 = bit_array.bit_size(body) % 8
+  assert is_whole_bytes(body)
     as "simulate.bit_array_body requires a whole number of bytes"
   request.set_body(request, workers.request_body(js_bytes_request(body)))
 }
@@ -146,36 +146,39 @@ fn js_bytes_request(body: BitArray) -> JsRequest
 ///
 /// # Panics
 ///
-/// Panics if the body is binary data that is not valid UTF-8, or is a
-/// stream, which cannot be read synchronously.
+/// Panics in the same cases as `read_body_bits`, and if the body is not
+/// valid UTF-8.
 ///
 pub fn read_body(response: Response) -> String {
-  case response.body {
-    workers.Text(text) -> text
-    workers.Bytes(bits) -> {
-      let assert Ok(text) = bit_array.to_string(bits)
-        as "the response body was non-UTF-8 binary data"
-      text
-    }
-    workers.Empty -> ""
-    workers.Stream(_) -> panic as "simulate.read_body cannot read a stream body"
-  }
+  let assert Ok(text) = bit_array.to_string(read_body_bits(response))
+    as "simulate.read_body requires a UTF-8 body"
+  text
 }
 
 /// Read the body of a response as a bit array.
 ///
 /// # Panics
 ///
-/// Panics if the body is a stream, which cannot be read synchronously.
+/// Panics if the body is a stream, which cannot be read synchronously, or is
+/// binary data that is not a whole number of bytes, which `rays/workers`
+/// would replace with a 500 response.
 ///
 pub fn read_body_bits(response: Response) -> BitArray {
   case response.body {
     workers.Text(text) -> bit_array.from_string(text)
-    workers.Bytes(bits) -> bits
+    workers.Bytes(bits) -> {
+      assert is_whole_bytes(bits)
+        as "simulate.read_body_bits requires a whole number of bytes"
+      bits
+    }
     workers.Empty -> <<>>
     workers.Stream(_) ->
       panic as "simulate.read_body_bits cannot read a stream body"
   }
+}
+
+fn is_whole_bytes(bits: BitArray) -> Bool {
+  bit_array.bit_size(bits) % 8 == 0
 }
 
 //
@@ -197,18 +200,14 @@ pub fn env() -> Env
 /// ```
 ///
 pub fn env_var(env: Env, name: String, value: String) -> Env {
-  env_with(env, name, dynamic.string(value))
+  env_binding(env, name, dynamic.string(value))
 }
 
 /// Add any value to the environment as a binding, such as a test double you
 /// have written for a KV namespace.
 ///
-pub fn env_binding(env: Env, name: String, value: Dynamic) -> Env {
-  env_with(env, name, value)
-}
-
 @external(javascript, "./simulate_ffi.mts", "envWith")
-fn env_with(env: Env, name: String, value: Dynamic) -> Env
+pub fn env_binding(env: Env, name: String, value: Dynamic) -> Env
 
 /// Create an execution context. `wait_until` and `pass_through_on_exception`
 /// do nothing.
