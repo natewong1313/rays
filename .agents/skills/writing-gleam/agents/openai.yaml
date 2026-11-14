@@ -1,0 +1,6 @@
+interface:
+  display_name: "Writing Gleam"
+  short_description: "Gleam conventions from twelve ecosystem studies"
+
+policy:
+  allow_implicit_invocation: true
