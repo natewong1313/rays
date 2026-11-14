@@ -1,0 +1,6 @@
+interface:
+  display_name: "Gleam JavaScript Promises"
+  short_description: "Typed async composition and honest promise FFI"
+
+policy:
+  allow_implicit_invocation: true
