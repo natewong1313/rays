@@ -7,7 +7,7 @@
 
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { build, BuildError } from "./project.ts";
+import { build, BuildError } from "@rays/cloudflare/build";
 
 const HELP = `Usage: rays <command> [options]
 

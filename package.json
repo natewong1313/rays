@@ -3,8 +3,8 @@
   "description": "Development tooling for rays: type checking the FFI shims, and building and testing the workspace.",
   "type": "module",
   "scripts": {
-    "build": "gleam build && pnpm --filter @rays/cloudflare build",
-    "test": "gleam test && pnpm --filter @rays/cloudflare build && pnpm -r test",
+    "build": "gleam build && pnpm --filter \"./packages/*\" build",
+    "test": "gleam test && pnpm --filter \"./packages/*\" build && pnpm -r test",
     "typecheck": "gleam build && tsc -p tsconfig.json"
   },
   "devDependencies": {

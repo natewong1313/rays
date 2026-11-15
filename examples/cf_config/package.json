@@ -1,0 +1,23 @@
+{
+  "name": "cf-config-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "deploy": "cf deploy",
+    "types": "cf workers types",
+    "test": "gleam test && vitest run",
+    "typecheck": "cf workers types && tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "2.0.0-beta.v.17",
+    "@cloudflare/vitest-plugin": "catalog:",
+    "@rays/cloudflare": "workspace:*",
+    "@types/node": "catalog:",
+    "cf": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

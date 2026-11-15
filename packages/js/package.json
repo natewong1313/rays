@@ -2,39 +2,65 @@
   "name": "@rays/cloudflare",
   "version": "0.1.0",
   "private": true,
-  "description": "JavaScript helpers for using rays Workers alongside TypeScript Workers.",
+  "description": "JavaScript helpers for rays Workers: using them from TypeScript, and building them with Vite.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
     "./runtime": {
       "types": "./dist/runtime.d.ts",
       "default": "./dist/runtime.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "default": "./dist/vite.js"
+    },
+    "./cf": {
+      "types": "./dist/cf.d.ts",
+      "default": "./dist/cf.js"
+    },
+    "./build": {
+      "types": "./dist/build.d.ts",
+      "default": "./dist/build.js"
+    },
+    "./virtual": {
+      "types": "./virtual.d.ts"
+    },
+    "./main": {
+      "types": "./main.d.ts"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "main.d.ts",
+    "virtual.d.ts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.runtime.json && tsc -p tsconfig.node.json",
-    "build:bin": "bun build --compile src/cli.ts --outfile dist/bin/rays",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
   },
   "peerDependencies": {
-    "@cloudflare/workers-types": "*"
+    "@cloudflare/workers-types": "*",
+    "cf": ">=1.0.0-beta.32",
+    "vite": "^6.1.0 || ^7.0.0 || ^8.0.0"
   },
   "peerDependenciesMeta": {
     "@cloudflare/workers-types": {
+      "optional": true
+    },
+    "cf": {
+      "optional": true
+    },
+    "vite": {
       "optional": true
     }
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
+    "cf": "catalog:",
     "typescript": "catalog:",
+    "vite": "catalog:",
     "vitest": "catalog:"
-  },
-  "bin": {
-    "rays": "./dist/cli.js"
   }
 }

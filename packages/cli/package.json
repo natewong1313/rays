@@ -1,0 +1,28 @@
+{
+  "name": "@rays/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The rays command: builds rays Workers from Gleam for Wrangler.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "rays": "./dist/cli.js"
+  },
+  "files": [
+    "dist/cli.js"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:bin": "bun build --compile src/cli.ts --outfile dist/bin/rays",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@rays/cloudflare": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

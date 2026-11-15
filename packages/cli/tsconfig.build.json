@@ -1,0 +1,16 @@
+{
+  // The `rays` command, which runs in Node.js or Bun on the developer's
+  // machine. It uses only `node:` modules, so both can run it.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2022"],
+    "types": ["node"],
+    "strict": true,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}

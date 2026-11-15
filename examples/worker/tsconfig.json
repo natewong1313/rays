@@ -9,8 +9,10 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     // Runtime and `Env` types come from worker-configuration.d.ts, generated
-    // by `pnpm types`. These add `cloudflare:test` for the integration tests.
-    "types": ["@cloudflare/vitest-plugin/types"]
+    // by `pnpm types`. These add `cloudflare:test` for the integration tests,
+    // and the rays Worker as the main module, which `wrangler types` can't
+    // see because it's the virtual module `virtual:rays/worker`.
+    "types": ["@cloudflare/vitest-plugin/types", "@rays/cloudflare/main"]
   },
-  "include": [".rays/**/*.ts", "worker-configuration.d.ts", "test/**/*.ts"]
+  "include": ["worker-configuration.d.ts", "test/**/*.ts"]
 }

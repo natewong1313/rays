@@ -1,0 +1,167 @@
+// Tests the `rays()` Vite plugin with Vite's own dev server and build, without
+// Cloudflare's plugins: Vite loads the Worker in Node.js.
+
+import path from "node:path";
+import {
+  build,
+  createLogger,
+  createServer,
+  type InlineConfig,
+  type Rolldown,
+  type ViteDevServer,
+} from "vite";
+import { afterEach, describe, expect, it } from "vitest";
+import { rays, type RaysOptions } from "../src/vite.ts";
+import { fetcher, useFixture } from "./fixture.ts";
+
+const fixture = useFixture();
+
+const adminModule = `import app
+import rays/workers
+
+pub fn main() -> workers.Worker {
+  app.main()
+}
+`;
+
+const helloAgain = `import gleam/javascript/promise
+import rays/workers
+
+pub fn main() -> workers.Worker {
+  workers.new(fn(_, _, _) {
+    workers.ok()
+    |> workers.string_body("Hello again")
+    |> promise.resolve
+  })
+}
+`;
+
+function config(options?: RaysOptions): {
+  config: InlineConfig;
+  errors: string[];
+} {
+  const errors: string[] = [];
+  const logger = createLogger("silent");
+  logger.error = (message) => void errors.push(message);
+  return {
+    errors,
+    config: {
+      root: fixture.root,
+      configFile: false,
+      customLogger: logger,
+      plugins: [rays(options)],
+    },
+  };
+}
+
+describe("in development", () => {
+  let server: ViteDevServer | undefined;
+
+  afterEach(async () => {
+    await server?.close();
+    server = undefined;
+  });
+
+  async function start(options?: RaysOptions) {
+    const { config: inline, errors } = config(options);
+    server = await createServer({
+      ...inline,
+      appType: "custom",
+      server: { middlewareMode: true, ws: false },
+    });
+    const running = server;
+    const load = async (id: string) =>
+      fetcher((await running.ssrLoadModule(id))["default"]);
+    return { server: running, errors, load };
+  }
+
+  it("serves the Worker from the module named after the package", async () => {
+    const { load } = await start();
+    const response = await (await load("virtual:rays/worker"))("/");
+    expect(await response.text()).toBe("Hello from app");
+  });
+
+  it("serves the Worker from a named module", async () => {
+    await fixture.write("src/admin.gleam", adminModule);
+    const { load } = await start();
+    const response = await (await load("virtual:rays/worker/admin"))("/");
+    expect(await response.text()).toBe("Hello from app");
+  });
+
+  it("serves the module given as an option", async () => {
+    await fixture.write("src/admin.gleam", adminModule);
+    const { server } = await start({ module: "admin" });
+    const { code } = (await server.transformRequest("virtual:rays/worker", {
+      ssr: true,
+    }))!;
+    expect(code).toContain("src/admin.gleam");
+  });
+
+  it("accepts the path Cloudflare's Vitest plugin asks for", async () => {
+    const { load } = await start();
+    const fetch = await load(path.join(fixture.root, "virtual:rays/worker"));
+    expect(await (await fetch("/")).text()).toBe("Hello from app");
+  });
+
+  it("explains a module that can't be a Worker", async () => {
+    await fixture.write("src/helpers.gleam", "pub fn greet() {\n  Nil\n}\n");
+    const { load } = await start();
+    await expect(load("virtual:rays/worker/helpers")).rejects.toThrow(
+      "src/helpers.gleam has no public main function.",
+    );
+  });
+
+  it("keeps the last good build until a change compiles", async () => {
+    const { errors, load } = await start();
+    await load("virtual:rays/worker");
+
+    await fixture.write("src/app.gleam", "pub fn main( {\n");
+    await until(() => errors.some((error) => error.includes("[rays]")));
+    expect(errors.join("\n")).toContain("[rays] gleam build failed.");
+    const stale = await load("virtual:rays/worker");
+    expect(await (await stale("/")).text()).toBe("Hello from app");
+
+    await fixture.write("src/app.gleam", helloAgain);
+    await until(async () => {
+      const fresh = await load("virtual:rays/worker");
+      return (await (await fresh("/")).text()) === "Hello again";
+    });
+  });
+});
+
+describe("vite build", () => {
+  const ssrBuild = (inline: InlineConfig) =>
+    build({
+      ...inline,
+      logLevel: "silent",
+      build: { ssr: "virtual:rays/worker", write: false },
+    }) as Promise<Rolldown.RolldownOutput[] | Rolldown.RolldownOutput>;
+
+  it("bundles the Worker", async () => {
+    const output = await ssrBuild(config().config);
+    const [result] = Array.isArray(output) ? output : [output];
+    const code = result!.output.map((chunk) =>
+      chunk.type === "chunk" ? chunk.code : "",
+    );
+    expect(code.join("\n")).toContain("Hello from app");
+  });
+
+  it("fails when Gleam fails to compile", async () => {
+    await fixture.write("src/app.gleam", "pub fn main( {\n");
+    await expect(ssrBuild(config().config)).rejects.toThrow(
+      "gleam build failed.",
+    );
+  });
+});
+
+// Wait for a condition that a file watcher makes true.
+async function until(
+  condition: () => boolean | Promise<boolean>,
+  timeout = 10_000,
+): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (!(await condition())) {
+    if (Date.now() > deadline) throw new Error("Timed out waiting");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}

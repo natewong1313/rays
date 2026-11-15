@@ -1,8 +1,10 @@
 /**
  * Building a Gleam project into Cloudflare Worker entry modules.
  *
- * Shared by the `rays build` command and the build integrations that use it.
- * Uses only `node:` modules, so it runs in both Node.js and Bun.
+ * This is the API for build integrations: the `rays build` command from
+ * `@rays/cli` and the `rays()` Vite plugin both use it. Most projects use one
+ * of those instead of calling it directly. It uses only `node:` modules, so
+ * it runs in both Node.js and Bun.
  *
  * @module
  */
@@ -10,25 +12,43 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { isModuleName, notAModuleName } from "./module-name.ts";
 
 /** The directory, next to `gleam.toml`, that `rays build` writes into. */
-export const OUTPUT_DIR = ".rays";
+const OUTPUT_DIR = ".rays";
 
 /** A build failure with a message meant for the developer. */
 export class BuildError extends Error {
   override name = "BuildError";
+
+  /** What Gleam printed, if the failure came from Gleam. */
+  readonly output: string;
+
+  constructor(message: string, output = "") {
+    super(message);
+    this.output = output;
+  }
 }
 
-export interface BuildOptions {
+export interface CompileOptions {
   /** The directory holding `gleam.toml`. */
   root: string;
+  /** The `gleam` executable. Defaults to `$RAYS_GLEAM_BIN`, then `gleam`. */
+  gleam?: string;
+  /**
+   * Where Gleam's output goes. `"inherit"` (the default) gives it the
+   * terminal, keeping its colours. `"tee"` copies it to stderr and also keeps
+   * it, so a failure's {@link BuildError.output} holds Gleam's errors.
+   */
+  output?: "inherit" | "tee";
+}
+
+export interface BuildOptions extends CompileOptions {
   /**
    * The Gleam modules whose `main()` builds a Worker, such as `"app"` or
    * `"app/admin"`. Defaults to the module named after the Gleam package.
    */
   modules?: readonly string[];
-  /** The `gleam` executable. Defaults to `$RAYS_GLEAM_BIN`, then `gleam`. */
-  gleam?: string;
 }
 
 /** An entry module written by {@link build}. */
@@ -41,6 +61,54 @@ export interface Entry {
   changed: boolean;
 }
 
+/** A Gleam project, compiled to JavaScript by {@link compile}. */
+export interface Project {
+  /** The absolute path of the directory holding `gleam.toml`. */
+  root: string;
+  /** The Gleam package's name, which is also its default Worker module. */
+  packageName: string;
+  /**
+   * The absolute path of the compiled JavaScript for a Worker module.
+   *
+   * @throws {BuildError} If the module doesn't exist, or has no
+   *   `pub fn main() -> workers.Worker`.
+   */
+  workerModule(module: string): string;
+}
+
+/**
+ * Compile the Gleam project to JavaScript, and read the types of its modules
+ * so that its Worker modules can be checked.
+ *
+ * @throws {BuildError} If the project is not usable or fails to compile.
+ */
+export async function compile(options: CompileOptions): Promise<Project> {
+  const root = path.resolve(options.root);
+  const packageName = await readPackageName(root);
+  const gleam = options.gleam ?? process.env["RAYS_GLEAM_BIN"] ?? "gleam";
+  await runGleam(gleam, root, ["build", "--target", "javascript"], {
+    output: options.output ?? "inherit",
+  });
+  const modules = await readInterface(gleam, root);
+
+  return {
+    root,
+    packageName,
+    workerModule(module) {
+      checkModuleName(module);
+      checkWorkerModule(module, modules[module]);
+      return path.join(
+        root,
+        "build",
+        "dev",
+        "javascript",
+        packageName,
+        `${module}.mjs`,
+      );
+    },
+  };
+}
+
 /**
  * Compile the Gleam project to JavaScript and write one entry module per
  * Worker to `.rays/<module>.entry.ts`.
@@ -49,36 +117,31 @@ export interface Entry {
  * build leaves the last good entries in place.
  *
  * @throws {BuildError} If the project or a module is not usable, or Gleam
- *   fails to compile it. Gleam's own errors go to stderr as it prints them.
+ *   fails to compile it.
  */
 export async function build(options: BuildOptions): Promise<Entry[]> {
   const root = path.resolve(options.root);
-  const packageName = await readPackageName(root);
-  const modules = options.modules?.length ? options.modules : [packageName];
-  for (const module of modules) checkModuleName(module);
+  // Check the names first, so a typo doesn't wait for a compile.
+  for (const module of options.modules ?? []) checkModuleName(module);
 
-  const gleam = options.gleam ?? process.env["RAYS_GLEAM_BIN"] ?? "gleam";
-  await runGleam(gleam, root, ["build", "--target", "javascript"]);
-  const modulesInterface = await readInterface(gleam, root);
+  const project = await compile({ ...options, root });
+  const modules = options.modules?.length
+    ? options.modules
+    : [project.packageName];
 
-  const outputs = [];
-  for (const module of modules) {
-    checkWorkerModule(module, modulesInterface[module]);
-    const compiled = path.join(
-      root,
-      "build",
-      "dev",
-      "javascript",
-      packageName,
-      `${module}.mjs`,
-    );
+  const outputs = modules.map((module) => {
+    const compiled = project.workerModule(module);
     const entry = path.join(root, OUTPUT_DIR, `${module}.entry.ts`);
-    outputs.push({
+    const specifier = relativeSpecifier(path.dirname(entry), compiled);
+    return {
       module,
       path: entry,
-      source: entrySource(module, entry, compiled),
-    });
-  }
+      source: entrySource(module, specifier, {
+        generator: "rays build",
+        typescript: true,
+      }),
+    };
+  });
 
   await mkdir(path.join(root, OUTPUT_DIR), { recursive: true });
   await writeIfChanged(path.join(root, OUTPUT_DIR, ".gitignore"), "*\n");
@@ -92,7 +155,7 @@ export async function build(options: BuildOptions): Promise<Entry[]> {
 }
 
 /** Read the package name from the `gleam.toml` in `root`. */
-export async function readPackageName(root: string): Promise<string> {
+async function readPackageName(root: string): Promise<string> {
   const file = path.join(root, "gleam.toml");
   let toml: string;
   try {
@@ -116,30 +179,30 @@ export async function readPackageName(root: string): Promise<string> {
 }
 
 function checkModuleName(module: string): void {
-  if (!/^[a-z][a-z0-9_]*(\/[a-z][a-z0-9_]*)*$/.test(module)) {
-    throw new BuildError(
-      `"${module}" is not a Gleam module name. Module names look like "app" or "app/admin".`,
-    );
-  }
+  if (!isModuleName(module)) throw new BuildError(notAModuleName(module));
 }
 
 // Run Gleam and return its stdout. Its stderr, where its progress and errors
-// go, is passed through as it is written, or with `quiet`, only if it fails.
+// go, is passed through (see `CompileOptions.output`), or with `"quiet"`
+// printed only if it fails.
 function runGleam(
   gleam: string,
   root: string,
   args: readonly string[],
-  { quiet = false } = {},
+  { output }: { output: "inherit" | "tee" | "quiet" },
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(gleam, args, {
       cwd: root,
-      stdio: ["ignore", "pipe", quiet ? "pipe" : "inherit"],
+      stdio: ["ignore", "pipe", output === "inherit" ? "inherit" : "pipe"],
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
-    child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr.push(chunk);
+      if (output === "tee") process.stderr.write(chunk);
+    });
     child.on("error", (error) => {
       if (isErrorCode(error, "ENOENT")) {
         reject(
@@ -152,12 +215,21 @@ function runGleam(
       }
     });
     child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout).toString("utf8"));
+        return;
+      }
+      const printed = Buffer.concat(stderr).toString("utf8");
+      if (output === "quiet") process.stderr.write(printed);
       const command = `gleam ${args[0]}`;
-      if (code !== 0) process.stderr.write(Buffer.concat(stderr));
-      if (code === 0) resolve(Buffer.concat(stdout).toString("utf8"));
-      else if (signal !== null) {
-        reject(new BuildError(`${command} was stopped by ${signal}.`));
-      } else reject(new BuildError(`${command} failed.`));
+      reject(
+        new BuildError(
+          signal === null
+            ? `${command} failed.`
+            : `${command} was stopped by ${signal}.`,
+          printed,
+        ),
+      );
     });
   });
 }
@@ -183,7 +255,7 @@ async function readInterface(
   root: string,
 ): Promise<Record<string, ModuleInterface | undefined>> {
   const json = await runGleam(gleam, root, ["export", "package-interface"], {
-    quiet: true,
+    output: "quiet",
   });
   return (JSON.parse(json) as { modules: Record<string, ModuleInterface> })
     .modules;
@@ -243,36 +315,51 @@ function describeType(type: TypeInterface): string {
   }
 }
 
-// The entry module is self-contained: it doesn't import @rays/cloudflare, so
-// it works in projects that only depend on Wrangler.
-function entrySource(module: string, entry: string, compiled: string): string {
-  let specifier = path
-    .relative(path.dirname(entry), compiled)
-    .split(path.sep)
-    .join("/");
-  if (!specifier.startsWith(".")) specifier = `./${specifier}`;
+/** An import specifier for `file`, relative to the directory `from`. */
+function relativeSpecifier(from: string, file: string): string {
+  const specifier = path.relative(from, file).split(path.sep).join("/");
+  return specifier.startsWith(".") ? specifier : `./${specifier}`;
+}
 
-  return `// Generated by \`rays build\` from src/${module}.gleam. Do not edit: it is
+/**
+ * The source of an entry module, which exports the Worker returned by `main`
+ * in the compiled Gleam module that `specifier` imports.
+ *
+ * The module is self-contained: it doesn't import `@rays/cloudflare`, so it
+ * works in projects that only depend on Wrangler.
+ */
+export function entrySource(
+  module: string,
+  specifier: string,
+  { generator, typescript }: { generator: string; typescript: boolean },
+): string {
+  const as = (type: string) => (typescript ? ` as ${type}` : "");
+  const message = `main in src/${module}.gleam must return a rays Worker, made with workers.new.`;
+  return `// Generated by ${generator} from src/${module}.gleam. Do not edit: it is
 // rewritten on every build.
 import { main } from ${JSON.stringify(specifier)};
 
-const worker: unknown = main();
+const worker${typescript ? ": unknown" : ""} = main();
 
 if (
   typeof worker !== "object" ||
   worker === null ||
-  (worker as Record<symbol, unknown>)[Symbol.for("rays.worker")] !== true
+  (worker${as("Record<symbol, unknown>")})[Symbol.for("rays.worker")] !== true
 ) {
-  throw new TypeError(
-    ${JSON.stringify(`main in src/${module}.gleam must return a rays Worker, made with workers.new.`)},
-  );
+  throw new TypeError(${JSON.stringify(message)});
 }
-
+${
+  typescript
+    ? `
 // Typed without the Workers runtime types, which the project may not use.
 export default worker as {
   fetch(request: Request, env: unknown, ctx: unknown): Promise<Response>;
 };
-`;
+`
+    : `
+export default worker;
+`
+}`;
 }
 
 // Write through a temporary file, so a watcher never sees half a file, and

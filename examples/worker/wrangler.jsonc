@@ -1,13 +1,8 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "rays-worker-example",
-  // Written by `rays build`, from `pub fn main()` in src/worker.gleam.
-  "main": ".rays/worker.entry.ts",
+  "main": "virtual:rays/worker",
   "compatibility_date": "2026-09-01",
-  "build": {
-    "command": "rays build --module worker",
-    "watch_dir": "src"
-  },
   "vars": {
     "GREETING": "Hello from Gleam on Cloudflare!"
   }
