@@ -15,9 +15,10 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.runtime.json && tsc -p tsconfig.node.json",
+    "build:bin": "bun build --compile src/cli.ts --outfile dist/bin/rays",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.test.json"
+    "typecheck": "tsc -p tsconfig.json"
   },
   "peerDependencies": {
     "@cloudflare/workers-types": "*"
@@ -29,7 +30,11 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "bin": {
+    "rays": "./dist/cli.js"
   }
 }

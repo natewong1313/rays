@@ -6,11 +6,13 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "types": "wrangler types",
-    "typecheck": "gleam build && wrangler types --check && tsc -p tsconfig.json",
-    "test": "gleam build && vitest run"
+    "typecheck": "rays build --module worker && wrangler types --check && tsc -p tsconfig.json",
+    "test": "rays build --module worker && vitest run",
+    "build": "rays build --module worker"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "catalog:",
+    "@rays/cloudflare": "workspace:*",
     "vitest": "catalog:",
     "wrangler": "catalog:"
   }

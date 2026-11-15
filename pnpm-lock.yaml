@@ -79,6 +79,9 @@ importers:
       '@cloudflare/vitest-plugin':
         specifier: 'catalog:'
         version: 1.8.2(@cloudflare/workers-types@5.20261114.1)(@types/node@24.19.2)(vitest@4.1.12(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)))
+      '@rays/cloudflare':
+        specifier: workspace:*
+        version: link:../../packages/js
       vitest:
         specifier: 'catalog:'
         version: 4.1.12(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2))
@@ -91,6 +94,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 5.20261114.1
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

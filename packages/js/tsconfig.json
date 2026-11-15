@@ -1,16 +1,21 @@
 {
+  // Type checks the sources and tests together. Nothing is emitted. The tests
+  // import the compiled `rays` Gleam package from the repository root's
+  // `build/` directory.
+  //
+  // Editors pick up this file for everything under `src/` and `test/`:
+  // language servers attach each file to the nearest `tsconfig.json`, so the
+  // emitting build configs live in `tsconfig.runtime.json` and
+  // `tsconfig.node.json` instead of this one.
+  "extends": "./tsconfig.node.json",
   "compilerOptions": {
-    "target": "es2022",
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "lib": ["es2022"],
-    // `ExportedHandler` and the other runtime types. Users get the same
-    // globals from `wrangler types` or `@cloudflare/workers-types`.
-    "types": ["@cloudflare/workers-types"],
-    "strict": true,
-    "declaration": true,
-    "rootDir": "src",
-    "outDir": "dist"
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "rootDir": "../..",
+    "types": ["node", "@cloudflare/workers-types"],
+    // Vitest's dependencies, Node's types and the Workers runtime types
+    // conflict with each other.
+    "skipLibCheck": true
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }

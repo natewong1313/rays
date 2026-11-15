@@ -12,5 +12,5 @@
     // by `pnpm types`. These add `cloudflare:test` for the integration tests.
     "types": ["@cloudflare/vitest-plugin/types"]
   },
-  "include": ["index.ts", "worker-configuration.d.ts", "test/**/*.ts"]
+  "include": [".rays/**/*.ts", "worker-configuration.d.ts", "test/**/*.ts"]
 }

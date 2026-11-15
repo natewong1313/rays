@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "gleam build && pnpm --filter @rays/cloudflare build",
-    "test": "gleam test && pnpm -r test",
+    "test": "gleam test && pnpm --filter @rays/cloudflare build && pnpm -r test",
     "typecheck": "gleam build && tsc -p tsconfig.json"
   },
   "devDependencies": {
