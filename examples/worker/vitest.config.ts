@@ -1,11 +1,11 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
-import { rays } from "@rays/core/vite";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [
-    rays({ module: "worker" }),
-    cloudflareTest({ wrangler: { configPath: "./wrangler.jsonc" } }),
+    // The configuration rays writes from [tools.rays] in gleam.toml. Run
+    // `rays build` first; `pnpm test` does.
+    cloudflareTest({ wrangler: { configPath: "./.rays/wrangler.jsonc" } }),
   ],
   // Gleam also copies `.ts` files from `test/` into `build/`; only run the
   // originals.

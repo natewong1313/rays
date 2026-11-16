@@ -3,18 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "deploy": "vite build && wrangler deploy",
-    "types": "wrangler types",
-    "typecheck": "wrangler types --check && tsc -p tsconfig.json",
-    "test": "vitest run"
+    "dev": "rays dev",
+    "deploy": "rays deploy",
+    "types": "rays wrangler types",
+    "test": "rays build && vitest run",
+    "typecheck": "rays build && rays wrangler types --check && tsc -p tsconfig.json"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "catalog:",
     "@cloudflare/vitest-plugin": "catalog:",
-    "@rays/core": "workspace:*",
-    "vite": "catalog:",
+    "@rays/cli": "workspace:*",
     "vitest": "catalog:",
     "wrangler": "catalog:"
   }

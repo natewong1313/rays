@@ -1,4 +1,6 @@
 /build
-/.wrangler
 /node_modules
-/dist
+/.rays
+/.wrangler
+.dev.vars*
+.env*

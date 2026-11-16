@@ -1,9 +1,0 @@
-{
-  "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "rays-worker-example",
-  "main": "virtual:rays/worker",
-  "compatibility_date": "2026-09-01",
-  "vars": {
-    "GREETING": "Hello from Gleam on Cloudflare!"
-  }
-}

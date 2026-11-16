@@ -48,7 +48,7 @@ describe("worker example", () => {
     });
   });
 
-  it("reads vars from wrangler.jsonc", async () => {
+  it("reads vars from gleam.toml", async () => {
     const response = await exports.default.fetch(url("/greeting"));
     expect(await response.text()).toBe("Hello from Gleam on Cloudflare!");
   });
