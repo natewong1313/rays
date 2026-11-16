@@ -102,8 +102,8 @@ describe("rays", () => {
   });
 
   it("rejects unknown commands", () => {
-    const result = rays("deploy");
+    const result = rays("nope");
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('rays: unknown command "deploy".');
+    expect(result.stderr).toContain('rays: unknown command "nope".');
   });
 });

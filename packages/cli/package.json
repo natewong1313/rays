@@ -18,11 +18,13 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@rays/cloudflare": "workspace:*"
+    "@rays/cloudflare": "workspace:*",
+    "smol-toml": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
   }
 }
