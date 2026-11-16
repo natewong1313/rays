@@ -10,7 +10,7 @@
     "test": "gleam build && vitest run"
   },
   "dependencies": {
-    "@rays/cloudflare": "workspace:*"
+    "@rays/core": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "catalog:",

@@ -7,7 +7,7 @@
  * Worker:
  *
  * ```ts
- * import { handler } from "@rays/cloudflare/runtime";
+ * import { handler } from "@rays/core/runtime";
  * import { main } from "./build/dev/javascript/my_app/my_app.mjs";
  *
  * const app = handler<Env>(main());

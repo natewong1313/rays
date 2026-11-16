@@ -9,7 +9,7 @@ import type { ChildProcess } from "node:child_process";
 import { existsSync, watch } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { build, BuildError } from "@rays/cloudflare/build";
+import { build, BuildError } from "@rays/core/build";
 import {
   CliError,
   readGleamToml,

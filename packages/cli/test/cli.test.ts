@@ -1,13 +1,13 @@
 // Tests the `rays` command against a real Gleam compiler. Each test runs it in
 // a copy of test/fixtures/app, a small rays Worker. The build itself is
-// tested in @rays/cloudflare; these test the command around it.
+// tested in @rays/core; these test the command around it.
 
 import { spawnSync } from "node:child_process";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { compile } from "@rays/cloudflare/build";
+import { compile } from "@rays/core/build";
 import {
   afterAll,
   afterEach,

@@ -13,7 +13,7 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "catalog:",
     "@cloudflare/vitest-plugin": "catalog:",
-    "@rays/cloudflare": "workspace:*",
+    "@rays/core": "workspace:*",
     "vite": "catalog:",
     "vitest": "catalog:",
     "wrangler": "catalog:"

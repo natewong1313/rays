@@ -1,5 +1,5 @@
 import { cloudflare } from "@cloudflare/vite-plugin";
-import { rays } from "@rays/cloudflare/vite";
+import { rays } from "@rays/core/vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({

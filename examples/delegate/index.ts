@@ -3,7 +3,7 @@
 // Requests under `/gleam/` go to the rays Worker built by `main` in
 // src/routes.gleam, which sees the request unchanged. Everything else is
 // handled here.
-import { handler } from "@rays/cloudflare/runtime";
+import { handler } from "@rays/core/runtime";
 import { main } from "./build/dev/javascript/delegate/routes.mjs";
 
 const gleam = handler<Env>(main());

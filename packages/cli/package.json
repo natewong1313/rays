@@ -18,7 +18,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@rays/cloudflare": "workspace:*",
+    "@rays/core": "workspace:*",
     "smol-toml": "catalog:"
   },
   "devDependencies": {

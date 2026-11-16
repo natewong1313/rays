@@ -1,7 +1,7 @@
 // Types for the modules made by the `rays()` Vite plugin from
-// `@rays/cloudflare/vite`. Add them to a project with
-// `"types": ["@rays/cloudflare/virtual"]` in tsconfig.json, or
-// `/// <reference types="@rays/cloudflare/virtual" />`.
+// `@rays/core/vite`. Add them to a project with
+// `"types": ["@rays/core/virtual"]` in tsconfig.json, or
+// `/// <reference types="@rays/core/virtual" />`.
 //
 // They don't depend on the Workers runtime types, so they work with either
 // `wrangler types` or `@cloudflare/workers-types`.

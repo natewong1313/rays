@@ -12,7 +12,7 @@
     // by `pnpm types`. These add `cloudflare:test` for the integration tests,
     // and the rays Worker as the main module, which `wrangler types` can't
     // see because it's the virtual module `virtual:rays/worker`.
-    "types": ["@cloudflare/vitest-plugin/types", "@rays/cloudflare/main"]
+    "types": ["@cloudflare/vitest-plugin/types", "@rays/core/main"]
   },
   "include": ["worker-configuration.d.ts", "test/**/*.ts"]
 }

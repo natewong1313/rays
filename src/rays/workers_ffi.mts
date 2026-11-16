@@ -18,7 +18,7 @@ export type Env = Record<string, unknown>;
 export type Header = [string, string];
 
 // Marks every Worker built by `rays/workers`, so JavaScript helpers such as
-// `handler()` in `@rays/cloudflare` can tell a Worker from other values. The
+// `handler()` in `@rays/core` can tell a Worker from other values. The
 // brand is part of the documented runtime shape of a `Worker`.
 const WORKER_BRAND = Symbol.for("rays.worker");
 

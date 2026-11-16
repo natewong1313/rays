@@ -1,5 +1,5 @@
 {
-  "name": "@rays/cloudflare",
+  "name": "@rays/core",
   "version": "0.1.0",
   "private": true,
   "description": "JavaScript helpers for rays Workers: using them from TypeScript, and building them with Vite.",

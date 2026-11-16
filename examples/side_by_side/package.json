@@ -9,7 +9,7 @@
     "test": "(cd api && gleam test) && vitest run"
   },
   "dependencies": {
-    "@rays/cloudflare": "workspace:*"
+    "@rays/core": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",

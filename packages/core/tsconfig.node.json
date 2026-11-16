@@ -1,5 +1,5 @@
 {
-  // The build integrations, `@rays/cloudflare/build`, `/vite` and `/cf`, which run
+  // The build integrations, `@rays/core/build`, `/vite` and `/cf`, which run
   // in Node.js or Bun on the developer's machine. They use only `node:`
   // modules, so both can run them.
   "compilerOptions": {

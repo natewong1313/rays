@@ -4,13 +4,13 @@
  * `raysWorker()` takes the same Worker configuration as `defineWorker()` from
  * `cf/config`, without `entrypoint`, and sets the entrypoint to the rays
  * Worker. The project builds with Vite, with the `rays()` plugin from
- * `@rays/cloudflare/vite` before Cloudflare's plugin, which builds the
+ * `@rays/core/vite` before Cloudflare's plugin, which builds the
  * Worker from Gleam.
  *
  * ```ts
  * // cloudflare.config.ts
  * import { bindings, defineConfig } from "cf/config";
- * import { raysWorker } from "@rays/cloudflare/cf";
+ * import { raysWorker } from "@rays/core/cf";
  *
  * export default defineConfig({
  *   worker: raysWorker({

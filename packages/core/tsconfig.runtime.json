@@ -1,5 +1,5 @@
 {
-  // The Worker runtime helpers, `@rays/cloudflare/runtime`. They run inside
+  // The Worker runtime helpers, `@rays/core/runtime`. They run inside
   // Workers, so they see the Workers runtime types and not Node's.
   "compilerOptions": {
     "target": "es2022",

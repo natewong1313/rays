@@ -1,5 +1,5 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
-import { rays } from "@rays/cloudflare/vite";
+import { rays } from "@rays/core/vite";
 import { defineConfig } from "vitest/config";
 import { namesWorker } from "./cloudflare.config.ts";
 

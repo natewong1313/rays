@@ -7,7 +7,7 @@
  * ```ts
  * // vite.config.ts
  * import { cloudflare } from "@cloudflare/vite-plugin";
- * import { rays } from "@rays/cloudflare/vite";
+ * import { rays } from "@rays/core/vite";
  * import { defineConfig } from "vite";
  *
  * export default defineConfig({ plugins: [rays(), cloudflare()] });
@@ -35,13 +35,13 @@
  * that only matters for Durable Objects and named entrypoints, which rays
  * Workers don't export.
  *
- * With `cloudflare.config.ts`, use `raysWorker()` from `@rays/cloudflare/cf`
+ * With `cloudflare.config.ts`, use `raysWorker()` from `@rays/core/cf`
  * to configure the Worker; it sets `entrypoint`.
  *
- * For types, add `"types": ["@rays/cloudflare/virtual"]` to `tsconfig.json`.
+ * For types, add `"types": ["@rays/core/virtual"]` to `tsconfig.json`.
  * `wrangler types` can't see what a virtual module exports, so when a
  * Wrangler config file's `main` is `virtual:rays/worker`, use
- * `"types": ["@rays/cloudflare/main"]` instead: it also types `exports` from
+ * `"types": ["@rays/core/main"]` instead: it also types `exports` from
  * `cloudflare:workers`. With `raysWorker()`, the types `cf` generates already
  * do that.
  *

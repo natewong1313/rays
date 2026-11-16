@@ -325,7 +325,7 @@ function relativeSpecifier(from: string, file: string): string {
  * The source of an entry module, which exports the Worker returned by `main`
  * in the compiled Gleam module that `specifier` imports.
  *
- * The module is self-contained: it doesn't import `@rays/cloudflare`, so it
+ * The module is self-contained: it doesn't import `@rays/core`, so it
  * works in projects that only depend on Wrangler.
  */
 export function entrySource(

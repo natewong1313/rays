@@ -53,7 +53,7 @@ import gleam/uri
 /// At runtime this is the `ExportedHandler` object Cloudflare expects, with a
 /// `fetch` method, so a JavaScript entry module can `export default main()`.
 /// It also has a `Symbol.for("rays.worker")` property set to `true`, which
-/// `handler()` from the `@rays/cloudflare` npm package checks for. Both are
+/// `handler()` from the `@rays/core` npm package checks for. Both are
 /// stable parts of the runtime shape.
 ///
 pub type Worker
