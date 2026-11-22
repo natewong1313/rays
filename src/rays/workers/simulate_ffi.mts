@@ -9,6 +9,7 @@ import { Result$Error, Result$Ok } from "../../gleam.mjs";
 import type { BitArray, Result } from "../../gleam.mjs";
 import { toUint8Array } from "../workers_ffi.mts";
 import type { Env, Worker } from "../workers_ffi.mts";
+import { simulatedService } from "../workers_rpc_ffi.mts";
 
 const PLACEHOLDER_URL = "https://simulate.invalid/";
 
@@ -65,6 +66,22 @@ export function envWithService(
   return envWith(env, name, service);
 }
 
+// A stand-in for a service binding to a Worker with RPC methods. See
+// `simulatedService` in `rays/workers_rpc`'s FFI.
+export function envWithRpcService(
+  env: Env,
+  name: string,
+  worker: Worker,
+  workerEnv: Env,
+  ctx: SimulatedContext,
+): Env {
+  return envWith(
+    env,
+    name,
+    simulatedService(worker, workerEnv, asRuntimeContext(ctx)),
+  );
+}
+
 // Only the members `rays/workers` uses.
 export type SimulatedContext = Pick<
   ExecutionContext,
@@ -82,14 +99,24 @@ export function context(): SimulatedContext {
   return {
     waitUntil(promise) {
       // Observe rejection immediately, even if the handler is still running.
-      waited.push(promise.then(
-        () => {},
-        (reason) => { failure ??= { reason }; },
-      ));
+      waited.push(
+        promise.then(
+          () => {},
+          (reason) => {
+            failure ??= { reason };
+          },
+        ),
+      );
     },
-    passThroughOnException() { passedThrough = true; },
-    get waited() { return waited.length; },
-    get passedThrough() { return passedThrough; },
+    passThroughOnException() {
+      passedThrough = true;
+    },
+    get waited() {
+      return waited.length;
+    },
+    get passedThrough() {
+      return passedThrough;
+    },
     async waitForBackground() {
       let drained = 0;
       while (drained < waited.length) {

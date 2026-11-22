@@ -8,8 +8,8 @@ Mist, birdie, and squirrel keep the user-facing surface narrow and give implemen
 
 ```text
 src/package.gleam
-src/package/internal/error.gleam
 src/package/internal/parser.gleam
+src/package/internal/connection.gleam
 src/package/internal/protocol/frame.gleam
 test/package/parser_test.gleam
 examples/complete/gleam.toml
@@ -24,7 +24,9 @@ internal_modules = ["lustre/internals/*", "lustre/vdom/*", "lustre/runtime/*"]
 
 Select patterns for the actual package; this setting controls the documentation surface. A private or opaque type controls what callers can construct. Keep source and tests aligned by responsibility; introduce unit/integration/snapshot layers when the package needs them.
 
-Snag, glance, and simplifile demonstrate that one cohesive public module can be enough. Wisp uses sections for responses, requests, and cookies inside its public module. File size alone is a weak reason to split a concept that callers use together.
+Internal modules name domain concerns (parsing, connections, protocol frames). Keep an error type with the operations that produce it rather than gathering every type or error into a module of its own.
+
+Snag, glance, and simplifile demonstrate that one cohesive public module can be enough. Wisp uses sections for responses, requests, and cookies inside its public module. File size alone is a weak reason to split a concept that callers use together. A caller who must import `client`, `config`, `decode`, `error`, and `types` to do one task is looking at one module split too early.
 
 ## Actors and protocols: gleam_otp and mist
 
@@ -60,15 +62,72 @@ Co-locate an error ADT and its exhaustive renderer when that keeps the diagnosti
 
 Squirrel favors documented discovery conventions over extra configuration. Apply that choice when a predictable project layout covers the use case. Snapshot generated code and diagnostic text when exact output is part of the contract, as squirrel and birdie do.
 
+## API clients: sans-io
+
+For an API client or SDK, write two pure functions per API action: one builds a `Request`, the other parses a `Response` into a `Result`. The caller sends the request with whatever HTTP client fits their target and framework, and can add retries or rate limiting. Adapted from the official Gleam conventions guide:
+
+```gleam
+import gleam/http
+import gleam/http/request.{type Request}
+import gleam/http/response.{type Response}
+import gleam/json
+
+pub type User {
+  User(name: String)
+}
+
+pub type CreateUserError {
+  NameTaken(name: String)
+  RateLimited
+  UnexpectedResponse(status: Int, body: String)
+}
+
+pub fn create_user_request(name: String) -> Request(String) {
+  let body = json.object([#("name", json.string(name))]) |> json.to_string
+  request.new()
+  |> request.set_method(http.Post)
+  |> request.set_host("api.example.com")
+  |> request.set_path("/users")
+  |> request.set_header("content-type", "application/json")
+  |> request.set_body(body)
+}
+
+pub fn create_user_response(
+  response: Response(String),
+  name: String,
+) -> Result(User, CreateUserError) {
+  case response.status {
+    201 -> Ok(User(name:))
+    409 -> Error(NameTaken(name:))
+    429 -> Error(RateLimited)
+    status -> Error(UnexpectedResponse(status:, body: response.body))
+  }
+}
+```
+
+A send-function parameter in place of this split restricts which clients work and cannot serve both Erlang and JavaScript, because the JavaScript client returns a `Promise`.
+
 ## FFI and target boundaries: simplifile
 
 Keep foreign operations behind small Gleam functions with a consistent typed API. Map foreign errors into the exposed taxonomy; preserve an unknown case where the foreign error space is open. Put domain decisions in Gleam and keep shims focused on runtime conversion.
+
+Give each foreign value a precise external type so the compiler rejects the wrong value at every call site:
+
+```gleam
+/// A JavaScript `ArrayBuffer`.
+pub type Buffer
+
+@external(javascript, "./buffer_ffi.mjs", "byteSize")
+pub fn byte_size(buffer: Buffer) -> Int
+```
+
+`Dynamic` accepts any value and defers mistakes to runtime. Reserve it for a value whose shape is genuinely unknown and that the caller will decode, such as an untyped platform binding.
 
 Respect the targets declared by the project. A cross-target library can have target-specific implementations behind one public API; a target-specific application can use its runtime directly. Check FFI conversion, error handling, and any promised normalization on the relevant target rather than assuming type checking proves runtime compatibility.
 
 ## Study provenance
 
-The skill was distilled from all twelve Markdown studies and their README synthesis in `rays/docs`. The table identifies the upstream projects studied; it is a source index, not an instruction to install their packages or fetch all their code.
+The skill was distilled from all twelve Markdown studies and their README synthesis in `rays/docs`, and reconciled with the official [Gleam conventions, patterns, and anti-patterns](https://gleam.run/documentation/conventions-patterns-and-anti-patterns/) guide, which takes precedence where they differ. The table identifies the upstream projects studied; it is a source index, not an instruction to install their packages or fetch all their code.
 
 | Study | Upstream project | Distinctive evidence |
 | --- | --- | --- |

@@ -1,8 +1,8 @@
 // Types the main module as a rays Worker from the `rays()` Vite plugin, for
 // a project with a Wrangler config file whose `main` is `virtual:rays/worker`.
-// Add it with `"types": ["@rays/core/main"]` in tsconfig.json.
+// Add it with `"types": ["@rays/config/main"]` in tsconfig.json.
 //
-// With `cloudflare.config.ts` and `raysWorker()` from `@rays/core/cf`
+// With `cloudflare.config.ts` and `raysWorker()` from `@rays/config/cf`
 // it isn't needed: the types `cf` generates already declare the main module.
 //
 // `wrangler types` normally declares the main module itself, which types

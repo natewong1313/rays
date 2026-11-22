@@ -1,0 +1,12 @@
+{
+  // Type checks the sources and tests together. Nothing is emitted. Editors
+  // attach each file to the nearest `tsconfig.json`, so the emitting config
+  // is `tsconfig.build.json`.
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "rootDir": "."
+  },
+  "include": ["src", "test"]
+}

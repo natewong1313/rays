@@ -6,3 +6,4 @@ target = "javascript"
 # The tests replace this with the absolute path of the repository root.
 rays = { path = "../../../../.." }
 gleam_javascript = ">= 1.0.1 and < 2.0.0"
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"

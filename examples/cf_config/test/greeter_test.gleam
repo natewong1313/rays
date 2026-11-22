@@ -17,9 +17,12 @@ pub fn main() -> Nil {
 /// An environment where `NAMES` is bound to the names Worker.
 fn env() -> workers.Env {
   simulate.env()
-  |> simulate.with_service("NAMES", simulate.context(), fn(request, ctx) {
-    names.handle_request(request, simulate.env(), ctx)
-  })
+  |> simulate.with_rpc_service(
+    "NAMES",
+    simulate.context(),
+    names.main(),
+    simulate.env(),
+  )
 }
 
 fn send(
@@ -37,13 +40,13 @@ fn send(
 pub fn greets_the_named_visitor_test() {
   use response <- promise.map(send(http.Get, "/", env()))
   assert response.status == 200
-  assert simulate.read_body(response) == "Hello, Joe!"
+  assert simulate.read_body(response) == "Hello, Dr Joe!"
 }
 
 pub fn uses_the_greeting_variable_test() {
   let env = env() |> simulate.env_var("GREETING", "Howdy")
   use response <- promise.map(send(http.Get, "/", env))
-  assert simulate.read_body(response) == "Howdy, Joe!"
+  assert simulate.read_body(response) == "Howdy, Dr Joe!"
 }
 
 pub fn fails_without_the_names_binding_test() {
@@ -67,5 +70,5 @@ pub fn names_worker_test() {
     simulate.env(),
     simulate.context(),
   ))
-  assert simulate.read_body(response) == "Joe"
+  assert response.status == 404
 }

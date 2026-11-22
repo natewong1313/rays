@@ -7,7 +7,7 @@
  * ```ts
  * // vite.config.ts
  * import { cloudflare } from "@cloudflare/vite-plugin";
- * import { rays } from "@rays/core/vite";
+ * import { rays } from "@rays/config/vite";
  * import { defineConfig } from "vite";
  *
  * export default defineConfig({ plugins: [rays(), cloudflare()] });
@@ -35,13 +35,13 @@
  * that only matters for Durable Objects and named entrypoints, which rays
  * Workers don't export.
  *
- * With `cloudflare.config.ts`, use `raysWorker()` from `@rays/core/cf`
+ * With `cloudflare.config.ts`, use `raysWorker()` from `@rays/config/cf`
  * to configure the Worker; it sets `entrypoint`.
  *
- * For types, add `"types": ["@rays/core/virtual"]` to `tsconfig.json`.
+ * For types, add `"types": ["@rays/config/virtual"]` to `tsconfig.json`.
  * `wrangler types` can't see what a virtual module exports, so when a
  * Wrangler config file's `main` is `virtual:rays/worker`, use
- * `"types": ["@rays/core/main"]` instead: it also types `exports` from
+ * `"types": ["@rays/config/main"]` instead: it also types `exports` from
  * `cloudflare:workers`. With `raysWorker()`, the types `cf` generates already
  * do that.
  *
@@ -50,7 +50,12 @@
 
 import path from "node:path";
 import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
-import { BuildError, compile, entrySource, type Project } from "./build.ts";
+import {
+  BuildError,
+  compile,
+  entrySource,
+  type Project,
+} from "@rays/core/build";
 
 /** The virtual module that exports a rays Worker. */
 export const WORKER_MODULE = "virtual:rays/worker";
@@ -119,10 +124,21 @@ export function rays(options: RaysOptions = {}): Plugin {
   // Whether each loaded Worker module failed its check in the last build.
   const broken = new Map<string, boolean>();
 
+  // The names of the last build's RPC methods, which the entry modules
+  // depend on.
+  let rpcMethods: string | undefined;
+
   // Vite reloads changed Gleam code itself, but it doesn't reload a virtual
   // module, which is where a Worker module is checked. Check the loaded ones
-  // again, and reload a Worker whose check started or stopped failing.
+  // again, and reload a Worker whose check started or stopped failing, or
+  // all of them when the RPC methods change.
+
   function recheckWorkers(project: Project): void {
+    const methods = JSON.stringify(
+      project.rpc?.methods.map((method) => method.name) ?? [],
+    );
+    const rpcChanged = rpcMethods !== undefined && rpcMethods !== methods;
+    rpcMethods = methods;
     if (server === undefined) return;
     for (const environment of Object.values(server.environments)) {
       let reload = false;
@@ -136,7 +152,7 @@ export function rays(options: RaysOptions = {}): Plugin {
           failed = true;
           report(error as Error);
         }
-        if (broken.get(id) !== failed) {
+        if (broken.get(id) !== failed || rpcChanged) {
           broken.set(id, failed);
           environment.moduleGraph.invalidateModule(node);
           reload = true;
@@ -223,9 +239,13 @@ export function rays(options: RaysOptions = {}): Plugin {
         broken.set(id, true);
         throw error;
       }
-      return entrySource(module, compiled.split(path.sep).join("/"), {
+      return entrySource(module, toSpecifier(compiled), {
         generator: "the rays Vite plugin",
         typescript: false,
+        rpc: good.rpc && {
+          methods: good.rpc.methods.map((method) => method.name),
+          specifier: toSpecifier(good.rpc.ffi),
+        },
       });
     },
   };
@@ -240,6 +260,10 @@ function workerSpecifier(id: string): string | undefined {
   const specifier = id.slice(at);
   const rest = specifier.slice(WORKER_MODULE.length);
   return rest === "" || rest.startsWith("/") ? specifier : undefined;
+}
+
+function toSpecifier(file: string): string {
+  return file.split(path.sep).join("/");
 }
 
 // The message for the error overlay: Gleam's own errors when it has them.

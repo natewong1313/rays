@@ -1,0 +1,20 @@
+{
+  // The modules that config files load, `@rays/config/vite`, `/cf` and
+  // `/vitest`. They run in Node.js or Bun on the developer's machine.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2022"],
+    "types": ["node"],
+    "strict": true,
+    // `cf/config`'s declarations expect the Workers runtime types as
+    // globals, which these Node.js modules don't load.
+    "skipLibCheck": true,
+    "declaration": true,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}

@@ -1,5 +1,4 @@
 // Gleam module names, such as "app" or "app/admin": lowercase path segments.
-// No dependencies, so `cloudflare.config.ts` can load it.
 
 /** Whether `name` is a Gleam module name. */
 export function isModuleName(name: string): boolean {

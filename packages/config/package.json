@@ -1,0 +1,60 @@
+{
+  "name": "@rays/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Configuring rays Workers: the Vite plugin, raysWorker() for cloudflare.config.ts, and running rays Workers in Vitest.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "default": "./dist/vite.js"
+    },
+    "./cf": {
+      "types": "./dist/cf.d.ts",
+      "default": "./dist/cf.js"
+    },
+    "./vitest": {
+      "types": "./dist/vitest.d.ts",
+      "default": "./dist/vitest.js"
+    },
+    "./virtual": {
+      "types": "./virtual.d.ts"
+    },
+    "./main": {
+      "types": "./main.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "main.d.ts",
+    "virtual.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@rays/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "cf": ">=1.0.0-beta.32",
+    "vite": "^6.1.0 || ^7.0.0 || ^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "cf": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "cf": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

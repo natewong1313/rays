@@ -2,7 +2,7 @@
 // one's entrypoint to the Worker built by `pub fn main()` in a Gleam module:
 // the module named after the package (src/greeter.gleam) unless `module`
 // says otherwise.
-import { raysWorker } from "@rays/core/cf";
+import { raysWorker } from "@rays/config/cf";
 import { bindings, defineConfig } from "cf/config";
 
 const compatibilityDate = "2026-09-01";

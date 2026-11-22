@@ -1,7 +1,6 @@
 {
-  // The build integrations, `@rays/core/build`, `/vite` and `/cf`, which run
-  // in Node.js or Bun on the developer's machine. They use only `node:`
-  // modules, so both can run them.
+  // The build step, `@rays/core/build`, which runs in Node.js or Bun on the
+  // developer's machine. It uses only `node:` modules, so both can run it.
   "compilerOptions": {
     "target": "es2022",
     "module": "nodenext",
@@ -9,13 +8,11 @@
     "lib": ["es2022"],
     "types": ["node"],
     "strict": true,
-    // `cf/config`'s declarations, used by `/cf`, expect the Workers runtime
-    // types as globals, which these Node.js modules don't load.
-    "skipLibCheck": true,
     "declaration": true,
     "rewriteRelativeImportExtensions": true,
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src/build.ts", "src/cf.ts", "src/module-name.ts", "src/vite.ts"]
+  "include": ["src"],
+  "exclude": ["src/runtime.ts"]
 }

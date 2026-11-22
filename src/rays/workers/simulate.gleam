@@ -253,6 +253,44 @@ fn js_env_with_service(
   context: Context,
 ) -> Env
 
+/// Add a fake service binding to the environment, bound to the given
+/// Worker, whose methods can be called with `rays/workers_rpc.call`.
+///
+/// Calls go straight to the handlers bound with `workers_rpc.bind`, with
+/// `worker_env` as their bindings and the given context, without encoding
+/// the values. So a simulated call doesn't check that its argument and reply
+/// can be sent, or that the two Workers have the same version of the method:
+/// test those with the Workers runtime, for example with Cloudflare's
+/// [Vitest integration](https://developers.cloudflare.com/workers/testing/vitest-integration/).
+///
+/// # Examples
+///
+/// ```gleam
+/// let ctx = simulate.context()
+/// let env =
+///   simulate.env()
+///   |> simulate.with_rpc_service("NAMES", ctx, names.main(), simulate.env())
+/// ```
+///
+pub fn with_rpc_service(
+  env: Env,
+  name: String,
+  context: Context,
+  worker: workers.Worker,
+  worker_env: Env,
+) -> Env {
+  js_env_with_rpc_service(env, name, worker, worker_env, context)
+}
+
+@external(javascript, "./simulate_ffi.mts", "envWithRpcService")
+fn js_env_with_rpc_service(
+  env: Env,
+  name: String,
+  worker: workers.Worker,
+  worker_env: Env,
+  context: Context,
+) -> Env
+
 /// Create an execution context that tracks work registered with `wait_until`.
 /// Await `wait_for_background` before finishing a test to observe its completion
 /// and failures. `pass_through_on_exception` does not forward requests.

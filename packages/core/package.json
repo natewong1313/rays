@@ -2,7 +2,7 @@
   "name": "@rays/core",
   "version": "0.1.0",
   "private": true,
-  "description": "JavaScript helpers for rays Workers: using them from TypeScript, and building them with Vite.",
+  "description": "The rays build step and Worker runtime helpers: building Gleam projects into Worker entry modules, and using rays Workers from TypeScript.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -10,29 +10,13 @@
       "types": "./dist/runtime.d.ts",
       "default": "./dist/runtime.js"
     },
-    "./vite": {
-      "types": "./dist/vite.d.ts",
-      "default": "./dist/vite.js"
-    },
-    "./cf": {
-      "types": "./dist/cf.d.ts",
-      "default": "./dist/cf.js"
-    },
     "./build": {
       "types": "./dist/build.d.ts",
       "default": "./dist/build.js"
-    },
-    "./virtual": {
-      "types": "./virtual.d.ts"
-    },
-    "./main": {
-      "types": "./main.d.ts"
     }
   },
   "files": [
-    "dist",
-    "main.d.ts",
-    "virtual.d.ts"
+    "dist"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.runtime.json && tsc -p tsconfig.node.json",
@@ -40,27 +24,17 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "peerDependencies": {
-    "@cloudflare/workers-types": "*",
-    "cf": ">=1.0.0-beta.32",
-    "vite": "^6.1.0 || ^7.0.0 || ^8.0.0"
+    "@cloudflare/workers-types": "*"
   },
   "peerDependenciesMeta": {
     "@cloudflare/workers-types": {
-      "optional": true
-    },
-    "cf": {
-      "optional": true
-    },
-    "vite": {
       "optional": true
     }
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
-    "cf": "catalog:",
     "typescript": "catalog:",
-    "vite": "catalog:",
     "vitest": "catalog:"
   }
 }
