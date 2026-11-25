@@ -8,7 +8,7 @@ import {
   Result$isError,
 } from "../../gleam.mjs";
 import type { Result } from "../../gleam.mjs";
-import type { Header } from "../workers_ffi.mts";
+import type { Header } from "../worker_ffi.mts";
 import type { SimulatedContext } from "./simulate_ffi.mts";
 import { context, waitForBackground } from "./simulate_ffi.mts";
 

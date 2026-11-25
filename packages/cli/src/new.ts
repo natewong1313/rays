@@ -79,10 +79,10 @@ GREETING = "Hello"
     [`src/${name}.gleam`]: `import gleam/http.{Get}
 import gleam/javascript/promise.{type Promise}
 import gleam/result
-import rays/workers.{type Context, type Env, type Request, type Response}
+import rays/worker.{type Context, type Env, type Request, type Response}
 
-pub fn main() -> workers.Worker {
-  workers.new(handle_request)
+pub fn main() -> worker.Worker {
+  worker.new(handle_request)
 }
 
 pub fn handle_request(
@@ -90,19 +90,19 @@ pub fn handle_request(
   env: Env,
   _ctx: Context,
 ) -> Promise(Response) {
-  case workers.path_segments(req) {
+  case worker.path_segments(req) {
     [] -> hello(req, env, "world")
     [name] -> hello(req, env, name)
-    _ -> promise.resolve(workers.not_found())
+    _ -> promise.resolve(worker.not_found())
   }
 }
 
 // GET / and GET /:name, greeting with the GREETING variable from gleam.toml.
 fn hello(req: Request, env: Env, name: String) -> Promise(Response) {
-  use <- workers.require_method(req, Get)
-  let greeting = workers.env_var(env, "GREETING") |> result.unwrap("Hello")
-  workers.ok()
-  |> workers.string_body(greeting <> ", " <> name <> "!")
+  use <- worker.require_method(req, Get)
+  let greeting = worker.env_var(env, "GREETING") |> result.unwrap("Hello")
+  worker.ok()
+  |> worker.string_body(greeting <> ", " <> name <> "!")
   |> promise.resolve
 }
 `,
@@ -110,7 +110,7 @@ fn hello(req: Request, env: Env, name: String) -> Promise(Response) {
 import gleam/javascript/promise
 import gleeunit
 import ${name}
-import rays/workers/simulate
+import rays/worker/simulate
 
 pub fn main() -> Nil {
   gleeunit.main()

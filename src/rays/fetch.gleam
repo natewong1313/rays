@@ -2,7 +2,7 @@
 //// [service binding](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/)
 //// or to the internet with the global `fetch`.
 ////
-//// Requests are `gleam_http` requests with a `workers.Body`, the same body
+//// Requests are `gleam_http` requests with a `worker.Body`, the same body
 //// type used to build responses. Responses come back with a `ResponseBody`
 //// that is not read until you ask for it, so a response from another Worker
 //// can be passed on to the client without buffering it, using `forward`.
@@ -12,23 +12,23 @@
 //// import gleam/javascript/promise.{type Promise}
 //// import gleam/result
 //// import rays/fetch
-//// import rays/workers.{type Env, type Response}
+//// import rays/worker.{type Env, type Response}
 ////
 //// // Ask the Worker bound as `AUTH` who the user is, and pass its answer on.
 //// fn whoami(env: Env) -> Promise(Response) {
 ////   case fetch.service(env, "AUTH") {
-////     Error(_) -> promise.resolve(workers.internal_server_error())
+////     Error(_) -> promise.resolve(worker.internal_server_error())
 ////     Ok(auth) -> {
 ////       let request =
 ////         request.new()
 ////         |> request.set_path("/whoami")
-////         |> request.set_body(workers.Empty)
+////         |> request.set_body(worker.Empty)
 ////       use result <- promise.map(fetch.send(request, to: auth))
 ////       case result {
 ////         Ok(response) ->
 ////           fetch.forward(response)
-////           |> result.unwrap(workers.internal_server_error())
-////         Error(_) -> workers.response(502)
+////           |> result.unwrap(worker.internal_server_error())
+////         Error(_) -> worker.response(502)
 ////       }
 ////     }
 ////   }
@@ -46,7 +46,7 @@ import gleam/javascript/array.{type Array}
 import gleam/javascript/promise.{type Promise}
 import gleam/result
 import gleam/uri
-import rays/workers.{type Body, type BodyError, type Env, type ReadableStream}
+import rays/worker.{type Body, type BodyError, type Env, type ReadableStream}
 
 //
 // Targets
@@ -80,7 +80,7 @@ pub fn global() -> Target {
 /// ```gleam
 /// case fetch.service(env, "AUTH") {
 ///   Ok(auth) -> todo
-///   Error(_) -> workers.internal_server_error() |> promise.resolve
+///   Error(_) -> worker.internal_server_error() |> promise.resolve
 /// }
 /// ```
 ///
@@ -119,7 +119,7 @@ pub type SendError {
 /// let request =
 ///   request.new()
 ///   |> request.set_path("/users/1")
-///   |> request.set_body(workers.Empty)
+///   |> request.set_body(worker.Empty)
 /// use result <- promise.await(fetch.send(request, to: api))
 /// ```
 ///
@@ -156,11 +156,11 @@ fn to_js_request(request: Request(Body)) -> Result(JsRequest, String) {
   let url = request.to_uri(request) |> uri.to_string
   let headers = array.from_list(request.headers)
   case request.body {
-    workers.Empty -> js_empty_request(method, url, headers)
-    workers.Text(text) -> js_text_request(method, url, headers, text)
-    workers.Stream(stream) -> js_stream_request(method, url, headers, stream)
-    workers.Bytes(bits) ->
-      case workers.is_whole_bytes(bits) {
+    worker.Empty -> js_empty_request(method, url, headers)
+    worker.Text(text) -> js_text_request(method, url, headers, text)
+    worker.Stream(stream) -> js_stream_request(method, url, headers, stream)
+    worker.Bytes(bits) ->
+      case worker.is_whole_bytes(bits) {
         True -> js_bytes_request(method, url, headers, bits)
         False -> Error("Request body is not a whole number of bytes")
       }
@@ -199,8 +199,8 @@ pub fn read_bits(
 ) -> Promise(Result(BitArray, BodyError)) {
   let raw = response.body.raw
   case js_response_body_used(raw) {
-    True -> promise.resolve(Error(workers.BodyAlreadyRead))
-    False -> workers.body_read(js_read_bytes(raw))
+    True -> promise.resolve(Error(worker.BodyAlreadyRead))
+    False -> worker.body_read(js_read_bytes(raw))
   }
 }
 
@@ -212,7 +212,7 @@ pub fn read_bits(
 pub fn read_text(
   response: Response(ResponseBody),
 ) -> Promise(Result(String, BodyError)) {
-  workers.body_string(read_bits(response))
+  worker.body_string(read_bits(response))
 }
 
 /// Turn a received response into a response for the client, with the same
@@ -228,21 +228,21 @@ pub fn read_text(
 /// case result {
 ///   Ok(response) ->
 ///     fetch.forward(response)
-///     |> result.unwrap(workers.internal_server_error())
-///   Error(_) -> workers.response(502)
+///     |> result.unwrap(worker.internal_server_error())
+///   Error(_) -> worker.response(502)
 /// }
 /// ```
 ///
 pub fn forward(
   response: Response(ResponseBody),
-) -> Result(workers.Response, BodyError) {
+) -> Result(worker.Response, BodyError) {
   let raw = response.body.raw
   case js_response_body_used(raw) {
-    True -> Error(workers.BodyAlreadyRead)
+    True -> Error(worker.BodyAlreadyRead)
     False -> {
       let body = case js_response_body(raw) {
-        Ok(stream) -> workers.Stream(stream)
-        Error(_) -> workers.Empty
+        Ok(stream) -> worker.Stream(stream)
+        Error(_) -> worker.Empty
       }
       Ok(Response(..response, body:))
     }
@@ -314,5 +314,5 @@ fn js_response_body_used(response: JsResponse) -> Bool
 @external(javascript, "./fetch_ffi.mts", "responseBody")
 fn js_response_body(response: JsResponse) -> Result(ReadableStream, Nil)
 
-@external(javascript, "./workers_ffi.mts", "readBytes")
+@external(javascript, "./worker_ffi.mts", "readBytes")
 fn js_read_bytes(response: JsResponse) -> Promise(Result(BitArray, String))

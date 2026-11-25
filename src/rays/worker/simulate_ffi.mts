@@ -1,15 +1,15 @@
-// FFI shim for `rays/workers/simulate`: stand-in requests, `env`, and `ctx`.
+// FFI shim for `rays/worker/simulate`: stand-in requests, `env`, and `ctx`.
 //
-// Only the body of a simulated `Request` is read by `rays/workers`; its method,
+// Only the body of a simulated `Request` is read by `rays/worker`; its method,
 // URL, and headers come from the Gleam request record. The placeholder URL and
 // `POST` method exist because the Fetch API requires a URL and forbids a body
 // on `GET` requests.
 
 import { Result$Error, Result$Ok } from "../../gleam.mjs";
 import type { BitArray, Result } from "../../gleam.mjs";
-import { toUint8Array } from "../workers_ffi.mts";
-import type { Env, Worker } from "../workers_ffi.mts";
-import { simulatedService } from "../workers_rpc_ffi.mts";
+import { toUint8Array } from "../worker_ffi.mts";
+import type { Env, Worker } from "../worker_ffi.mts";
+import { simulatedService } from "../worker_rpc_ffi.mts";
 
 const PLACEHOLDER_URL = "https://simulate.invalid/";
 
@@ -67,7 +67,7 @@ export function envWithService(
 }
 
 // A stand-in for a service binding to a Worker with RPC methods. See
-// `simulatedService` in `rays/workers_rpc`'s FFI.
+// `simulatedService` in `rays/worker_rpc`'s FFI.
 export function envWithRpcService(
   env: Env,
   name: string,
@@ -82,7 +82,7 @@ export function envWithRpcService(
   );
 }
 
-// Only the members `rays/workers` uses.
+// Only the members `rays/worker` uses.
 export type SimulatedContext = Pick<
   ExecutionContext,
   "waitUntil" | "passThroughOnException"

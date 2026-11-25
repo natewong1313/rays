@@ -1,5 +1,5 @@
 // The footers appended to compiled modules, which register their custom
-// types and RPC methods with rays/workers_rpc's FFI.
+// types and RPC methods with rays/worker_rpc's FFI.
 
 import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -39,7 +39,7 @@ export async function writeFooters(
   );
   if (methods.length === 0 && !written) return;
   if (methods.length > 0 && !written) {
-    await writeFile(marker, "rays/workers_rpc footers are in this build.\n");
+    await writeFile(marker, "rays/worker_rpc footers are in this build.\n");
   }
 
   let packages: string[];
@@ -92,7 +92,7 @@ function footerFor(
   const lines = [
     FOOTER_MARKER,
     "// Added by rays to register this module's custom types and RPC methods",
-    "// for rays/workers_rpc. It is rewritten on every build.",
+    "// for rays/worker_rpc. It is rewritten on every build.",
     `import { register as $rays_register, registerMethod as $rays_register_method } from ${JSON.stringify(ffi)};`,
   ];
   if (classes.length > 0) {

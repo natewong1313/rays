@@ -8,7 +8,7 @@
 //// import gleam/http
 //// import gleam/javascript/promise
 //// import gleam/json
-//// import rays/workers/simulate
+//// import rays/worker/simulate
 ////
 //// pub fn create_person_test() {
 ////   let request =
@@ -46,7 +46,7 @@ import gleam/json.{type Json}
 import gleam/option.{None, Some}
 import gleam/string
 import gleam/uri
-import rays/workers.{
+import rays/worker.{
   type Context, type Env, type JsRequest, type Request, type Response,
 }
 
@@ -72,7 +72,7 @@ pub fn request(method: Method, path: String) -> Request {
   request.Request(
     method:,
     headers: [],
-    body: workers.request_body(js_empty_request()),
+    body: worker.request_body(js_empty_request()),
     scheme: http.Https,
     host: "example.com",
     port: None,
@@ -92,7 +92,7 @@ pub fn header(request: Request, name: String, value: String) -> Request {
 /// changed.
 ///
 pub fn string_body(request: Request, body: String) -> Request {
-  request.set_body(request, workers.request_body(js_text_request(body)))
+  request.set_body(request, worker.request_body(js_text_request(body)))
 }
 
 /// Set the body of the request to the given binary data. The content type is
@@ -103,9 +103,9 @@ pub fn string_body(request: Request, body: String) -> Request {
 /// Panics if the bit array is not a whole number of bytes.
 ///
 pub fn bit_array_body(request: Request, body: BitArray) -> Request {
-  assert workers.is_whole_bytes(body)
+  assert worker.is_whole_bytes(body)
     as "simulate.bit_array_body requires a whole number of bytes"
-  request.set_body(request, workers.request_body(js_bytes_request(body)))
+  request.set_body(request, worker.request_body(js_bytes_request(body)))
 }
 
 /// Set the body of the request to the given HTML, and set the content type
@@ -166,19 +166,19 @@ pub fn read_body(response: Response) -> String {
 /// # Panics
 ///
 /// Panics if the body is a stream, which cannot be read synchronously, or is
-/// binary data that is not a whole number of bytes, which `rays/workers`
+/// binary data that is not a whole number of bytes, which `rays/worker`
 /// would replace with a 500 response.
 ///
 pub fn read_body_bits(response: Response) -> BitArray {
   case response.body {
-    workers.Text(text) -> bit_array.from_string(text)
-    workers.Bytes(bits) -> {
-      assert workers.is_whole_bytes(bits)
+    worker.Text(text) -> bit_array.from_string(text)
+    worker.Bytes(bits) -> {
+      assert worker.is_whole_bytes(bits)
         as "simulate.read_body_bits requires a whole number of bytes"
       bits
     }
-    workers.Empty -> <<>>
-    workers.Stream(_) ->
+    worker.Empty -> <<>>
+    worker.Stream(_) ->
       panic as "simulate.read_body_bits cannot read a stream body"
   }
 }
@@ -228,7 +228,7 @@ pub fn env_binding(env: Env, name: String, value: Dynamic) -> Env
 /// let env =
 ///   simulate.env()
 ///   |> simulate.with_service("AUTH", ctx, fn(_request, _ctx) {
-///     workers.ok() |> workers.string_body("joe") |> promise.resolve
+///     worker.ok() |> worker.string_body("joe") |> promise.resolve
 ///   })
 /// ```
 ///
@@ -239,7 +239,7 @@ pub fn with_service(
   handler: fn(Request, Context) -> Promise(Response),
 ) -> Env {
   let worker =
-    workers.new(fn(request: Request, _env: Env, ctx: Context) {
+    worker.new(fn(request: Request, _env: Env, ctx: Context) {
       handler(request, ctx)
     })
   js_env_with_service(env, name, worker, context)
@@ -249,14 +249,14 @@ pub fn with_service(
 fn js_env_with_service(
   env: Env,
   name: String,
-  worker: workers.Worker,
+  worker: worker.Worker,
   context: Context,
 ) -> Env
 
 /// Add a fake service binding to the environment, bound to the given
-/// Worker, whose methods can be called with `rays/workers_rpc.call`.
+/// Worker, whose methods can be called with `rays/worker_rpc.call`.
 ///
-/// Calls go straight to the handlers bound with `workers_rpc.bind`, with
+/// Calls go straight to the handlers bound with `worker_rpc.bind`, with
 /// `worker_env` as their bindings and the given context, without encoding
 /// the values. So a simulated call doesn't check that its argument and reply
 /// can be sent, or that the two Workers have the same version of the method:
@@ -276,7 +276,7 @@ pub fn with_rpc_service(
   env: Env,
   name: String,
   context: Context,
-  worker: workers.Worker,
+  worker: worker.Worker,
   worker_env: Env,
 ) -> Env {
   js_env_with_rpc_service(env, name, worker, worker_env, context)
@@ -286,7 +286,7 @@ pub fn with_rpc_service(
 fn js_env_with_rpc_service(
   env: Env,
   name: String,
-  worker: workers.Worker,
+  worker: worker.Worker,
   worker_env: Env,
   context: Context,
 ) -> Env

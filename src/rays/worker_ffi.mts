@@ -1,4 +1,4 @@
-// FFI shim between the Cloudflare Workers runtime and `rays/workers`: the
+// FFI shim between the Cloudflare Workers runtime and `rays/worker`: the
 // exported handler, the Worker's bindings (`env`) and `ExecutionContext`, and
 // the Fetch API `Request` and `Response` classes.
 //
@@ -17,7 +17,7 @@ export type Env = Record<string, unknown>;
 
 export type Header = [string, string];
 
-// Marks every Worker built by `rays/workers`, so JavaScript helpers such as
+// Marks every Worker built by `rays/worker`, so JavaScript helpers such as
 // `handler()` in `@rays/core` can tell a Worker from other values. The
 // brand is part of the documented runtime shape of a `Worker`.
 const WORKER_BRAND = Symbol.for("rays.worker");

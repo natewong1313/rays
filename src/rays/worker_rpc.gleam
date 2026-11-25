@@ -12,19 +12,19 @@
 //// import gleam/javascript/promise.{type Promise}
 //// import gleam/list
 //// import gleam/string
-//// import rays/workers
-//// import rays/workers_rpc
+//// import rays/worker
+//// import rays/worker_rpc
 ////
-//// pub fn main() -> workers.Worker {
-////   workers.new(fn(_request, _env, _ctx) { promise.resolve(workers.not_found()) })
-////   |> workers_rpc.bind(search)
+//// pub fn main() -> worker.Worker {
+////   worker.new(fn(_request, _env, _ctx) { promise.resolve(worker.not_found()) })
+////   |> worker_rpc.bind(search)
 //// }
 ////
 //// pub type Search {
 ////   Search(query: String, limit: Int)
 //// }
 ////
-//// pub fn search(params: workers_rpc.Params(Search)) -> Promise(List(String)) {
+//// pub fn search(params: worker_rpc.Params(Search)) -> Promise(List(String)) {
 ////   let Search(query:, limit:) = params.args
 ////   ["Ada", "Adam", "Grace"]
 ////   |> list.filter(string.starts_with(_, query))
@@ -38,25 +38,25 @@
 //// import app/names
 //// import gleam/javascript/promise.{type Promise}
 //// import gleam/string
-//// import rays/workers.{type Context, type Env, type Request, type Response}
-//// import rays/workers_rpc
+//// import rays/worker.{type Context, type Env, type Request, type Response}
+//// import rays/worker_rpc
 ////
 //// pub fn handle_request(
 ////   _request: Request,
 ////   env: Env,
 ////   _ctx: Context,
 //// ) -> Promise(Response) {
-////   case workers_rpc.service(env, "NAMES") {
+////   case worker_rpc.service(env, "NAMES") {
 ////     Ok(service) -> {
-////       let call = workers_rpc.call(service, names.search, names.Search("Ad", 2))
+////       let call = worker_rpc.call(service, names.search, names.Search("Ad", 2))
 ////       use found <- promise.map(call)
 ////       case found {
 ////         Ok(found) ->
-////           workers.ok() |> workers.string_body(string.join(found, ", "))
-////         Error(_) -> workers.response(502)
+////           worker.ok() |> worker.string_body(string.join(found, ", "))
+////         Error(_) -> worker.response(502)
 ////       }
 ////     }
-////     Error(Nil) -> promise.resolve(workers.internal_server_error())
+////     Error(Nil) -> promise.resolve(worker.internal_server_error())
 ////   }
 //// }
 //// ```
@@ -75,12 +75,12 @@
 ////   module one Workers RPC method with the same name for each.
 ////
 //// So a method must be a public function in the package itself, not a
-//// dependency, whose only argument is a `workers_rpc.Params` and which
+//// dependency, whose only argument is a `worker_rpc.Params` and which
 //// returns a `Promise`. A Worker that binds anything else fails to start.
 //// Its name is the name of the Workers RPC method, which is what
 //// TypeScript callers and the Cloudflare dashboard see. A Worker built only
 //// with `gleam build` can still be tested with
-//// `rays/workers/simulate.with_rpc_service`.
+//// `rays/worker/simulate.with_rpc_service`.
 ////
 //// Both Workers must be built from the same code for a method's types. Each
 //// method has a version, a hash of its argument and reply types and of the
@@ -94,7 +94,7 @@
 
 import gleam/javascript/promise.{type Promise}
 import gleam/result
-import rays/workers.{type Context, type Env, type Worker}
+import rays/worker.{type Context, type Env, type Worker}
 
 /// What a method receives: the argument sent by the caller, and the serving
 /// Worker's bindings and context.
@@ -104,7 +104,7 @@ import rays/workers.{type Context, type Env, type Worker}
 /// # Examples
 ///
 /// ```gleam
-/// pub fn display_name(params: workers_rpc.Params(Int)) -> Promise(String) {
+/// pub fn display_name(params: worker_rpc.Params(Int)) -> Promise(String) {
 ///   users.display_name(params.env, params.args)
 /// }
 /// ```
@@ -126,10 +126,10 @@ pub type Params(args) {
 /// # Examples
 ///
 /// ```gleam
-/// pub fn main() -> workers.Worker {
-///   workers.new(handle_request)
-///   |> workers_rpc.bind(display_name)
-///   |> workers_rpc.bind(search)
+/// pub fn main() -> worker.Worker {
+///   worker.new(handle_request)
+///   |> worker_rpc.bind(display_name)
+///   |> worker_rpc.bind(search)
 /// }
 /// ```
 ///
@@ -155,13 +155,13 @@ pub type Service
 /// # Examples
 ///
 /// ```gleam
-/// case workers_rpc.service(env, "NAMES") {
+/// case worker_rpc.service(env, "NAMES") {
 ///   Ok(names) -> todo
-///   Error(Nil) -> workers.internal_server_error() |> promise.resolve
+///   Error(Nil) -> worker.internal_server_error() |> promise.resolve
 /// }
 /// ```
 ///
-@external(javascript, "./workers_rpc_ffi.mts", "service")
+@external(javascript, "./worker_rpc_ffi.mts", "service")
 pub fn service(env: Env, name: String) -> Result(Service, Nil)
 
 /// An error that can occur when calling a method on another Worker.
@@ -202,10 +202,10 @@ pub type CallError {
 /// # Examples
 ///
 /// ```gleam
-/// use name <- promise.await(workers_rpc.call(names, names.display_name, 42))
+/// use name <- promise.await(worker_rpc.call(names, names.display_name, 42))
 /// case name {
-///   Ok(name) -> workers.ok() |> workers.string_body(name) |> promise.resolve
-///   Error(_) -> workers.response(502) |> promise.resolve
+///   Ok(name) -> worker.ok() |> worker.string_body(name) |> promise.resolve
+///   Error(_) -> worker.response(502) |> promise.resolve
 /// }
 /// ```
 ///
@@ -231,14 +231,14 @@ fn to_call_error(failure: #(String, String, String)) -> CallError {
   }
 }
 
-@external(javascript, "./workers_rpc_ffi.mts", "bind")
+@external(javascript, "./worker_rpc_ffi.mts", "bind")
 fn js_bind(
   worker: Worker,
   method: fn(Params(args)) -> Promise(reply),
   handler: fn(args, Env, Context) -> Promise(reply),
 ) -> Worker
 
-@external(javascript, "./workers_rpc_ffi.mts", "call")
+@external(javascript, "./worker_rpc_ffi.mts", "call")
 fn js_call(
   service: Service,
   method: fn(Params(args)) -> Promise(reply),

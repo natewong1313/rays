@@ -33,7 +33,7 @@ export async function findMethods(context: RpcContext): Promise<RpcMethod[]> {
 
   for (const [module, moduleInterface] of Object.entries(context.modules)) {
     for (const [name, fn] of Object.entries(moduleInterface?.functions ?? {})) {
-      // A method is a function whose only argument is `workers_rpc.Params`.
+      // A method is a function whose only argument is `worker_rpc.Params`.
       // Other functions that take one, such as helpers with more arguments,
       // aren't methods.
       const [params, ...rest] = fn.parameters;
@@ -42,7 +42,7 @@ export async function findMethods(context: RpcContext): Promise<RpcMethod[]> {
       const returned = fn.return;
       if (!isPromise(returned)) {
         throw new RpcBuildError(
-          `${where} takes a workers_rpc.Params, so it is an RPC method and must return a Promise.`,
+          `${where} takes a worker_rpc.Params, so it is an RPC method and must return a Promise.`,
         );
       }
       if (RESERVED.has(name) || name.startsWith("__")) {
@@ -73,7 +73,7 @@ function isRaysType(
   return (
     type?.kind === "named" &&
     type.package === "rays" &&
-    type.module === "rays/workers_rpc" &&
+    type.module === "rays/worker_rpc" &&
     type.name === name
   );
 }

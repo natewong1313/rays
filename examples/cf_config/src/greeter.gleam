@@ -8,11 +8,11 @@ import gleam/javascript/promise.{type Promise}
 import gleam/option.{None, Some}
 import gleam/result
 import greeter/names.{Visitor}
-import rays/workers.{type Context, type Env, type Request, type Response}
-import rays/workers_rpc
+import rays/worker.{type Context, type Env, type Request, type Response}
+import rays/worker_rpc
 
-pub fn main() -> workers.Worker {
-  workers.new(handle_request)
+pub fn main() -> worker.Worker {
+  worker.new(handle_request)
 }
 
 pub fn handle_request(
@@ -20,31 +20,31 @@ pub fn handle_request(
   env: Env,
   _ctx: Context,
 ) -> Promise(Response) {
-  case workers.path_segments(req) {
+  case worker.path_segments(req) {
     [] -> greet(req, env)
-    _ -> promise.resolve(workers.not_found())
+    _ -> promise.resolve(worker.not_found())
   }
 }
 
 // GET / — "<GREETING>, <title> <name>!", with the visitor from the names
 // Worker.
 fn greet(req: Request, env: Env) -> Promise(Response) {
-  use <- workers.require_method(req, Get)
-  let greeting = workers.env_var(env, "GREETING") |> result.unwrap("Hello")
+  use <- worker.require_method(req, Get)
+  let greeting = worker.env_var(env, "GREETING") |> result.unwrap("Hello")
 
-  case workers_rpc.service(env, "NAMES") {
-    Error(Nil) -> promise.resolve(workers.internal_server_error())
+  case worker_rpc.service(env, "NAMES") {
+    Error(Nil) -> promise.resolve(worker.internal_server_error())
     Ok(service) -> {
-      use visitor <- promise.map(workers_rpc.call(
+      use visitor <- promise.map(worker_rpc.call(
         service,
         names.find_visitor,
         Nil,
       ))
       case visitor {
         Ok(visitor) ->
-          workers.ok()
-          |> workers.string_body(greeting <> ", " <> full_name(visitor) <> "!")
-        Error(_) -> workers.response(502)
+          worker.ok()
+          |> worker.string_body(greeting <> ", " <> full_name(visitor) <> "!")
+        Error(_) -> worker.response(502)
       }
     }
   }

@@ -11,12 +11,12 @@ const fixture = useFixture();
 
 // A second Worker in the fixture project, in app/names.
 const names = `import gleam/javascript/promise
-import rays/workers
+import rays/worker
 
-pub fn main() -> workers.Worker {
-  workers.new(fn(_request, _env, _ctx) {
-    workers.ok()
-    |> workers.string_body("Hello from names")
+pub fn main() -> worker.Worker {
+  worker.new(fn(_request, _env, _ctx) {
+    worker.ok()
+    |> worker.string_body("Hello from names")
     |> promise.resolve
   })
 }

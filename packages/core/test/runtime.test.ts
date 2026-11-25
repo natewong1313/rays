@@ -1,12 +1,12 @@
-// Tests `handler()` against a real Worker built by `rays/workers`. Run
+// Tests `handler()` against a real Worker built by `rays/worker`. Run
 // `gleam build` in the repository root first; the root `pnpm build` does.
 
 import type { ExecutionContext } from "@cloudflare/workers-types";
 import { describe, expect, it } from "vitest";
 import { handler } from "../src/runtime.ts";
-// The compiled `rays/workers` module. `new` is a reserved word in
-// JavaScript, so Gleam exports `workers.new` as `new$`.
-import { new$, ok } from "../../../build/dev/javascript/rays/rays/workers.mjs";
+// The compiled `rays/worker` module. `new` is a reserved word in
+// JavaScript, so Gleam exports `worker.new` as `new$`.
+import { new$, ok } from "../../../build/dev/javascript/rays/rays/worker.mjs";
 
 // Only the members a `rays` Worker uses; the runtime type has more.
 const ctx = {

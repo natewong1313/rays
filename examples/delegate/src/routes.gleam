@@ -4,23 +4,23 @@
 
 import gleam/http.{Get}
 import gleam/javascript/promise.{type Promise}
-import rays/workers.{type Context, type Env, type Request, type Response}
+import rays/worker.{type Context, type Env, type Request, type Response}
 
-pub fn main() -> workers.Worker {
-  workers.new(handle_request)
+pub fn main() -> worker.Worker {
+  worker.new(handle_request)
 }
 
 fn handle_request(req: Request, _env: Env, _ctx: Context) -> Promise(Response) {
-  case workers.path_segments(req) {
+  case worker.path_segments(req) {
     ["gleam", "hello", name] -> hello(req, name)
-    _ -> promise.resolve(workers.not_found())
+    _ -> promise.resolve(worker.not_found())
   }
 }
 
 // GET /gleam/hello/:name
 fn hello(req: Request, name: String) -> Promise(Response) {
-  use <- workers.require_method(req, Get)
-  workers.ok()
-  |> workers.string_body("Hello, " <> name <> ", from Gleam!")
+  use <- worker.require_method(req, Get)
+  worker.ok()
+  |> worker.string_body("Hello, " <> name <> ", from Gleam!")
   |> promise.resolve
 }

@@ -7,7 +7,7 @@ export class RpcBuildError extends Error {
   override name = "RpcBuildError";
 }
 
-/** An RPC method: a public function taking `workers_rpc.Params`. */
+/** An RPC method: a public function taking `worker_rpc.Params`. */
 export interface RpcMethod {
   /** The Gleam module it is defined in. */
   module: string;

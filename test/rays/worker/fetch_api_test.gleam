@@ -1,14 +1,14 @@
 //// Tests for the boundary between the Workers runtime and Gleam: converting
 //// a Fetch API `Request` into a Gleam request, and a Gleam response back into
 //// a Fetch API `Response`. Handler logic is tested with `simulate` instead,
-//// in `workers_test`.
+//// in `worker_test`.
 
 import gleam/http
 import gleam/http/response
 import gleam/javascript/array.{type Array}
 import gleam/javascript/promise.{type Promise}
 import gleam/option.{None, Some}
-import rays/workers.{type Context, type Handler, type Request, type Response}
+import rays/worker.{type Context, type Handler, type Request, type Response}
 
 type JsRequest
 
@@ -34,7 +34,7 @@ fn js_failing_body_request(url: String) -> JsRequest
 
 @external(javascript, "./fetch_api_test_ffi.mts", "run")
 fn js_run(
-  worker: workers.Worker,
+  worker: worker.Worker,
   request: JsRequest,
 ) -> Promise(#(JsResponse, Int, Bool))
 
@@ -60,7 +60,7 @@ type Outcome {
 
 fn run(handler: Handler, request: JsRequest) -> Promise(Outcome) {
   use #(response, waited, passed_through) <- promise.map(js_run(
-    workers.new(handler),
+    worker.new(handler),
     request,
   ))
   Outcome(response:, waited:, passed_through:)
@@ -90,8 +90,8 @@ fn respond_with(response: Response) -> Promise(JsResponse) {
 }
 
 fn echo_body(req: Request, _, _) -> Promise(Response) {
-  use body <- workers.require_string_body(req)
-  promise.resolve(workers.ok() |> workers.string_body(body))
+  use body <- worker.require_string_body(req)
+  promise.resolve(worker.ok() |> worker.string_body(body))
 }
 
 // Requests
@@ -112,8 +112,8 @@ pub fn request_fields_are_converted_test() {
     assert req.query == Some("sort=name")
     // Header names are lowercased by the Fetch API.
     assert req.headers == [#("x-custom", "Hello")]
-    assert workers.cf_properties(req) == Error(Nil)
-    promise.resolve(workers.ok())
+    assert worker.cf_properties(req) == Error(Nil)
+    promise.resolve(worker.ok())
   }
   use response <- promise.map(send(handler, request))
   assert status(response) == 200
@@ -125,7 +125,7 @@ pub fn default_port_is_none_test() {
   let handler = fn(req: Request, _, _) {
     assert req.method == http.Get
     assert req.port == None
-    promise.resolve(workers.ok())
+    promise.resolve(worker.ok())
   }
   use response <- promise.map(send(handler, request))
   assert status(response) == 200
@@ -148,9 +148,9 @@ pub fn request_body_is_readable_test() {
 
 pub fn failed_body_read_is_bad_request_test() {
   let handler = fn(req: Request, _, _) {
-    use result <- promise.map(workers.read_body_bits(req))
-    assert result == Error(workers.BodyReadFailed(reason: "connection lost"))
-    workers.ok()
+    use result <- promise.map(worker.read_body_bits(req))
+    assert result == Error(worker.BodyReadFailed(reason: "connection lost"))
+    worker.ok()
   }
   use response <- promise.await(send(
     handler,
@@ -168,9 +168,9 @@ pub fn failed_body_read_is_bad_request_test() {
 
 pub fn text_response_test() {
   use response <- promise.await(respond_with(
-    workers.response(201)
-    |> workers.set_header("x-thing", "1")
-    |> workers.string_body("Hello, Joe!"),
+    worker.response(201)
+    |> worker.set_header("x-thing", "1")
+    |> worker.string_body("Hello, Joe!"),
   ))
   assert status(response) == 201
   assert header(response, "x-thing") == Ok("1")
@@ -180,7 +180,7 @@ pub fn text_response_test() {
 
 pub fn bytes_response_test() {
   use response <- promise.await(respond_with(
-    workers.ok() |> workers.bit_array_body(<<"bytes":utf8>>),
+    worker.ok() |> worker.bit_array_body(<<"bytes":utf8>>),
   ))
   use body <- promise.map(text(response))
   assert body == "bytes"
@@ -188,7 +188,7 @@ pub fn bytes_response_test() {
 
 pub fn unaligned_bit_array_is_server_error_test() {
   use response <- promise.await(respond_with(
-    workers.ok() |> workers.bit_array_body(<<1:size(3)>>),
+    worker.ok() |> worker.bit_array_body(<<1:size(3)>>),
   ))
   assert status(response) == 500
   assert header(response, "content-type") == Ok("text/plain; charset=utf-8")
@@ -198,8 +198,8 @@ pub fn unaligned_bit_array_is_server_error_test() {
 
 pub fn stream_body_passes_through_test() {
   let handler = fn(req: Request, _, _) {
-    let assert Ok(stream) = workers.body_stream(req)
-    promise.resolve(workers.ok() |> workers.stream_body(stream))
+    let assert Ok(stream) = worker.body_stream(req)
+    promise.resolve(worker.ok() |> worker.stream_body(stream))
   }
   use response <- promise.await(send(handler, post_root("streamed!")))
   use body <- promise.map(text(response))
@@ -209,7 +209,7 @@ pub fn stream_body_passes_through_test() {
 pub fn repeated_headers_are_preserved_test() {
   let headers = [#("set-cookie", "a=1"), #("set-cookie", "b=2")]
   use response <- promise.map(respond_with(
-    response.Response(..workers.no_content(), headers:),
+    response.Response(..worker.no_content(), headers:),
   ))
   assert array.to_list(set_cookies(response)) == ["a=1", "b=2"]
 }
@@ -217,12 +217,12 @@ pub fn repeated_headers_are_preserved_test() {
 pub fn null_body_statuses_drop_the_body_test() {
   // The Fetch API throws if a 204 is given any body, even an empty string.
   use response <- promise.await(respond_with(
-    workers.response(204) |> workers.string_body(""),
+    worker.response(204) |> worker.string_body(""),
   ))
   assert status(response) == 204
   assert !has_body(response)
   use response <- promise.map(respond_with(
-    workers.response(304) |> workers.string_body("cached"),
+    worker.response(304) |> worker.string_body("cached"),
   ))
   assert status(response) == 304
   assert !has_body(response)
@@ -232,9 +232,9 @@ pub fn null_body_statuses_drop_the_body_test() {
 
 pub fn context_is_passed_through_test() {
   let handler = fn(_, _, ctx: Context) {
-    workers.wait_until(ctx, promise.wait(1))
-    workers.pass_through_on_exception(ctx)
-    promise.resolve(workers.ok())
+    worker.wait_until(ctx, promise.wait(1))
+    worker.pass_through_on_exception(ctx)
+    promise.resolve(worker.ok())
   }
   use outcome <- promise.map(run(handler, get_root()))
   assert outcome.waited == 1

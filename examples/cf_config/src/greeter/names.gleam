@@ -3,12 +3,12 @@
 
 import gleam/javascript/promise.{type Promise}
 import gleam/option.{type Option, Some}
-import rays/workers.{type Context, type Env, type Request, type Response}
-import rays/workers_rpc
+import rays/worker.{type Context, type Env, type Request, type Response}
+import rays/worker_rpc
 
-pub fn main() -> workers.Worker {
-  workers.new(handle_request)
-  |> workers_rpc.bind(find_visitor)
+pub fn main() -> worker.Worker {
+  worker.new(handle_request)
+  |> worker_rpc.bind(find_visitor)
 }
 
 pub fn handle_request(
@@ -16,7 +16,7 @@ pub fn handle_request(
   _env: Env,
   _ctx: Context,
 ) -> Promise(Response) {
-  promise.resolve(workers.not_found())
+  promise.resolve(worker.not_found())
 }
 
 /// Who is visiting, with their title if they have one.
@@ -25,7 +25,7 @@ pub type Visitor {
 }
 
 /// Find the visitor. Another Worker calls this with
-/// `workers_rpc.call(service, names.find_visitor, Nil)`.
-pub fn find_visitor(_params: workers_rpc.Params(Nil)) -> Promise(Visitor) {
+/// `worker_rpc.call(service, names.find_visitor, Nil)`.
+pub fn find_visitor(_params: worker_rpc.Params(Nil)) -> Promise(Visitor) {
   promise.resolve(Visitor(name: "Joe", title: Some("Dr")))
 }

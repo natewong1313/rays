@@ -9,7 +9,7 @@ describe("cf_config example", () => {
   });
 
   it("has the names Worker refuse a call from a different version", async () => {
-    // A call the way rays/workers_rpc makes one, from a Worker built from
+    // A call the way rays/worker_rpc makes one, from a Worker built from
     // different types.
     const names = (env as unknown as Record<string, any>).NAMES;
     const reply = await names.find_visitor({

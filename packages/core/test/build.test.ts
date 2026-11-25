@@ -48,12 +48,12 @@ describe("build", () => {
   it("builds the modules it is given, including nested ones", async () => {
     await write(
       "src/admin.gleam",
-      "import app\nimport rays/workers\n\npub fn main() -> workers.Worker {\n  app.main()\n}\n",
+      "import app\nimport rays/worker\n\npub fn main() -> worker.Worker {\n  app.main()\n}\n",
     );
     await mkdir(path.join(fixture.root, "src", "api"));
     await write(
       "src/api/worker.gleam",
-      "import app\nimport rays/workers\n\npub fn main() -> workers.Worker {\n  app.main()\n}\n",
+      "import app\nimport rays/worker\n\npub fn main() -> worker.Worker {\n  app.main()\n}\n",
     );
 
     const entries = await build({
@@ -144,18 +144,18 @@ describe("build", () => {
     await expect(
       build({ root: fixture.root, modules: ["plain"] }),
     ).rejects.toThrow(
-      "main in src/plain.gleam must return a workers.Worker, but it returns String.",
+      "main in src/plain.gleam must return a worker.Worker, but it returns String.",
     );
   });
 
   it("names the type a main function returns", async () => {
-    await write("src/env.gleam", mainReturning("workers.Env", "panic"));
+    await write("src/env.gleam", mainReturning("worker.Env", "panic"));
     await expect(
       build({ root: fixture.root, modules: ["env"] }),
-    ).rejects.toThrow("but it returns rays/workers.Env.");
+    ).rejects.toThrow("but it returns rays/worker.Env.");
     await write(
       "src/handler.gleam",
-      mainReturning("workers.Handler", "fn(_, _, _) { panic }"),
+      mainReturning("worker.Handler", "fn(_, _, _) { panic }"),
     );
     await expect(
       build({ root: fixture.root, modules: ["handler"] }),
@@ -165,12 +165,12 @@ describe("build", () => {
   it("writes an entry that rejects a value that only claims to be a Worker", async () => {
     await write(
       "src/fake.gleam",
-      'import rays/workers\n\n@external(javascript, "./fake_ffi.mjs", "fake")\npub fn main() -> workers.Worker\n',
+      'import rays/worker\n\n@external(javascript, "./fake_ffi.mjs", "fake")\npub fn main() -> worker.Worker\n',
     );
     await write("src/fake_ffi.mjs", "export const fake = () => ({});\n");
     const [entry] = await build({ root: fixture.root, modules: ["fake"] });
     await expect(importWorker(entry!.path)).rejects.toThrow(
-      "main in src/fake.gleam must return a rays Worker, made with workers.new.",
+      "main in src/fake.gleam must return a rays Worker, made with worker.new.",
     );
   });
 });

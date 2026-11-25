@@ -17,20 +17,20 @@ import { fetcher, useFixture } from "./fixture.ts";
 const fixture = useFixture();
 
 const adminModule = `import app
-import rays/workers
+import rays/worker
 
-pub fn main() -> workers.Worker {
+pub fn main() -> worker.Worker {
   app.main()
 }
 `;
 
 const helloAgain = `import gleam/javascript/promise
-import rays/workers
+import rays/worker
 
-pub fn main() -> workers.Worker {
-  workers.new(fn(_, _, _) {
-    workers.ok()
-    |> workers.string_body("Hello again")
+pub fn main() -> worker.Worker {
+  worker.new(fn(_, _, _) {
+    worker.ok()
+    |> worker.string_body("Hello again")
     |> promise.resolve
   })
 }

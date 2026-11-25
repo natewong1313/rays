@@ -1,13 +1,13 @@
 /**
- * The build step behind `rays/workers_rpc`.
+ * The build step behind `rays/worker_rpc`.
  *
  * Workers RPC can't copy Gleam values, which are class instances, so
- * `rays/workers_rpc` encodes them into plain data and decodes them back into
+ * `rays/worker_rpc` encodes them into plain data and decodes them back into
  * the same classes. For that, every class has to be found again by name. The
  * Gleam compiler has no hooks, so after it compiles the project this appends
  * a footer to every compiled module, inside the module where even an opaque
  * type's private class is in scope, that registers its custom types and RPC
- * methods with the registry in `rays/workers_rpc`'s FFI.
+ * methods with the registry in `rays/worker_rpc`'s FFI.
  *
  * It also finds the RPC methods, so the entry module can give its
  * `WorkerEntrypoint` one method for each, and gives each a version that
@@ -28,7 +28,7 @@ export { RpcBuildError, type RpcMethod } from "./types.ts";
 export interface RpcBuild {
   /** The project's RPC methods, sorted by name. */
   methods: RpcMethod[];
-  /** The absolute path of `rays/workers_rpc`'s FFI module, in the build. */
+  /** The absolute path of `rays/worker_rpc`'s FFI module, in the build. */
   ffi: string;
 }
 
@@ -57,7 +57,7 @@ export async function buildRpc(options: {
     context.javascript,
     "rays",
     "rays",
-    "workers_rpc_ffi.mts",
+    "worker_rpc_ffi.mts",
   );
   await writeFooters(context, methods, ffi);
   return methods.length === 0 ? undefined : { methods, ffi };

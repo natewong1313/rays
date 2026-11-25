@@ -42,7 +42,7 @@ export function useFixture(): Fixture {
 
 /** A `pub fn main()` returning `type`, with `body`. */
 export const mainReturning = (type: string, body: string) =>
-  `import rays/workers\n\npub fn main() -> ${type} {\n  ${body}\n}\n`;
+  `import rays/worker\n\npub fn main() -> ${type} {\n  ${body}\n}\n`;
 
 /** A Worker's `fetch`, called the way the Workers runtime calls it. */
 export function fetcher(worker: unknown) {

@@ -7,7 +7,7 @@
  * already be compiled to JavaScript and described with Miniflare's
  * `WorkerOptions`. {@link raysTestWorkers} does both for the rays Workers
  * the Worker under test binds, so calls between them, including Workers RPC
- * with `rays/workers_rpc`, run for real in `workerd`:
+ * with `rays/worker_rpc`, run for real in `workerd`:
  *
  * ```ts
  * // vitest.config.ts

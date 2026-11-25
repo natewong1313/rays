@@ -1,7 +1,7 @@
 /**
  * Use a rays Worker from TypeScript.
  *
- * A rays Worker, returned by a Gleam `main()` built with `rays/workers`, is
+ * A rays Worker, returned by a Gleam `main()` built with `rays/worker`, is
  * already a Cloudflare `ExportedHandler`. `handler()` checks that and types
  * it, so you can export it from an entry module or call it from your own
  * Worker:
@@ -24,7 +24,7 @@
  * @module
  */
 
-// Set to `true` on every Worker built by `rays/workers`. This is part of the
+// Set to `true` on every Worker built by `rays/worker`. This is part of the
 // Worker's documented runtime shape, along with its `fetch` method.
 const WORKER_BRAND = Symbol.for("rays.worker");
 
@@ -41,7 +41,7 @@ export type RaysHandler<Env = unknown> = ExportedHandler<Env> & {
  * `wrangler types`, to type the `env` argument of `fetch`.
  *
  * @param worker The result of calling a Gleam `main()` that returns a
- *   `workers.Worker`.
+ *   `worker.Worker`.
  * @throws {TypeError} If `worker` is not a rays Worker, for example because
  *   `main` was passed instead of `main()`.
  */

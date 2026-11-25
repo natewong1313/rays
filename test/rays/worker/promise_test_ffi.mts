@@ -1,6 +1,6 @@
 import { Result$isError, Result$Error$0 } from "../../gleam.mjs";
 import { context, waitForBackground } from "./simulate_ffi.mts";
-import { readBytes } from "../workers_ffi.mts";
+import { readBytes } from "../worker_ffi.mts";
 import { run } from "./fetch_api_test_ffi.mts";
 
 function check(condition: unknown, message: string): asserts condition {

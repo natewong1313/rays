@@ -7,16 +7,16 @@
 ////
 //// ```gleam
 //// import gleam/javascript/promise.{type Promise}
-//// import rays/workers.{type Context, type Env, type Request, type Response}
+//// import rays/worker.{type Context, type Env, type Request, type Response}
 ////
-//// pub fn main() -> workers.Worker {
-////   workers.new(handle_request)
+//// pub fn main() -> worker.Worker {
+////   worker.new(handle_request)
 //// }
 ////
 //// fn handle_request(req: Request, _env: Env, _ctx: Context) -> Promise(Response) {
-////   case workers.path_segments(req) {
-////     [] -> workers.ok() |> workers.html_body("<h1>Hello!</h1>") |> promise.resolve
-////     _ -> promise.resolve(workers.not_found())
+////   case worker.path_segments(req) {
+////     [] -> worker.ok() |> worker.html_body("<h1>Hello!</h1>") |> promise.resolve
+////     _ -> promise.resolve(worker.not_found())
 ////   }
 //// }
 //// ```
@@ -86,8 +86,8 @@ type JsResponse
 /// # Examples
 ///
 /// ```gleam
-/// pub fn main() -> workers.Worker {
-///   workers.new(handle_request)
+/// pub fn main() -> worker.Worker {
+///   worker.new(handle_request)
 /// }
 /// ```
 ///
@@ -159,13 +159,13 @@ fn to_js_response(response: Response) -> JsResponse {
 /// # Examples
 ///
 /// ```gleam
-/// case workers.env_var(env, "API_TOKEN") {
+/// case worker.env_var(env, "API_TOKEN") {
 ///   Ok(token) -> todo
-///   Error(_) -> workers.internal_server_error() |> promise.resolve
+///   Error(_) -> worker.internal_server_error() |> promise.resolve
 /// }
 /// ```
 ///
-@external(javascript, "./workers_ffi.mts", "envVar")
+@external(javascript, "./worker_ffi.mts", "envVar")
 pub fn env_var(env: Env, name: String) -> Result(String, Nil)
 
 /// Get any binding from the Worker's environment as a dynamic value.
@@ -176,19 +176,19 @@ pub fn env_var(env: Env, name: String) -> Result(String, Nil)
 /// This is an escape hatch for bindings that `rays` does not yet provide
 /// typed APIs for.
 ///
-@external(javascript, "./workers_ffi.mts", "envBinding")
+@external(javascript, "./worker_ffi.mts", "envBinding")
 pub fn env_binding(env: Env, name: String) -> Result(Dynamic, Nil)
 
 /// Extend the lifetime of the Worker until the given promise settles, without
 /// delaying the response. Useful for logging, analytics, or cache writes.
 ///
-@external(javascript, "./workers_ffi.mts", "waitUntil")
+@external(javascript, "./worker_ffi.mts", "waitUntil")
 pub fn wait_until(ctx: Context, promise: Promise(a)) -> Nil
 
 /// If the Worker throws an unhandled exception, forward the request to the
 /// origin server instead of returning an error page.
 ///
-@external(javascript, "./workers_ffi.mts", "passThroughOnException")
+@external(javascript, "./worker_ffi.mts", "passThroughOnException")
 pub fn pass_through_on_exception(ctx: Context) -> Nil
 
 //
@@ -209,7 +209,7 @@ pub opaque type RequestBody {
   RequestBody(raw: JsRequest)
 }
 
-/// Wrap a JS `Request` as a request body. Used by `rays/workers/simulate`,
+/// Wrap a JS `Request` as a request body. Used by `rays/worker/simulate`,
 /// which builds the JS `Request` itself.
 ///
 @internal
@@ -246,7 +246,7 @@ pub type BodyError {
 ///
 /// ```gleam
 /// // GET /users/123
-/// workers.path_segments(request)
+/// worker.path_segments(request)
 /// // -> ["users", "123"]
 /// ```
 ///
@@ -351,7 +351,7 @@ fn body_error_response(error: BodyError) -> Response {
 /// # Examples
 ///
 /// ```gleam
-/// use <- workers.require_method(req, http.Post)
+/// use <- worker.require_method(req, http.Post)
 /// ```
 ///
 pub fn require_method(
@@ -420,7 +420,7 @@ pub fn require_bit_array_body(
 /// # Examples
 ///
 /// ```gleam
-/// use body <- workers.require_string_body(req)
+/// use body <- worker.require_string_body(req)
 /// ```
 ///
 pub fn require_string_body(
@@ -443,10 +443,10 @@ pub fn require_string_body(
 /// # Examples
 ///
 /// ```gleam
-/// use value <- workers.require_json(req)
+/// use value <- worker.require_json(req)
 /// case decode.run(value, person_decoder()) {
 ///   Ok(person) -> todo
-///   Error(_) -> workers.unprocessable_content() |> promise.resolve
+///   Error(_) -> worker.unprocessable_content() |> promise.resolve
 /// }
 /// ```
 ///
@@ -504,7 +504,7 @@ pub type Body {
 }
 
 /// Whether the bit array is a whole number of bytes, as the Fetch API
-/// requires of a binary body. Used by `rays/fetch` and `rays/workers/simulate`
+/// requires of a binary body. Used by `rays/fetch` and `rays/worker/simulate`
 /// as well.
 ///
 @internal
@@ -604,7 +604,7 @@ pub fn html_response(html: String, status: Int) -> Response {
 ///
 /// ```gleam
 /// json.object([#("name", json.string("Joe"))])
-/// |> workers.json_response(201)
+/// |> worker.json_response(201)
 /// ```
 ///
 pub fn json_response(data: Json, status: Int) -> Response {
@@ -712,54 +712,54 @@ pub fn internal_server_error() -> Response {
 // FFI
 //
 
-@external(javascript, "./workers_ffi.mts", "makeWorker")
+@external(javascript, "./worker_ffi.mts", "makeWorker")
 fn make_worker(
   fetch: fn(JsRequest, Env, Context) -> Promise(JsResponse),
 ) -> Worker
 
-@external(javascript, "./workers_ffi.mts", "requestMethod")
+@external(javascript, "./worker_ffi.mts", "requestMethod")
 fn js_request_method(request: JsRequest) -> String
 
-@external(javascript, "./workers_ffi.mts", "requestUrl")
+@external(javascript, "./worker_ffi.mts", "requestUrl")
 fn js_request_url(request: JsRequest) -> String
 
-@external(javascript, "./workers_ffi.mts", "requestHeaders")
+@external(javascript, "./worker_ffi.mts", "requestHeaders")
 fn js_request_headers(request: JsRequest) -> Array(#(String, String))
 
-@external(javascript, "./workers_ffi.mts", "requestCf")
+@external(javascript, "./worker_ffi.mts", "requestCf")
 fn js_request_cf(request: JsRequest) -> Result(Dynamic, Nil)
 
-@external(javascript, "./workers_ffi.mts", "bodyUsed")
+@external(javascript, "./worker_ffi.mts", "bodyUsed")
 fn js_body_used(request: JsRequest) -> Bool
 
-@external(javascript, "./workers_ffi.mts", "bodyStream")
+@external(javascript, "./worker_ffi.mts", "bodyStream")
 fn js_body_stream(request: JsRequest) -> ReadableStream
 
-@external(javascript, "./workers_ffi.mts", "readBytes")
+@external(javascript, "./worker_ffi.mts", "readBytes")
 fn js_read_bytes(request: JsRequest) -> Promise(Result(BitArray, String))
 
-@external(javascript, "./workers_ffi.mts", "textResponse")
+@external(javascript, "./worker_ffi.mts", "textResponse")
 fn js_text_response(
   status: Int,
   headers: Array(#(String, String)),
   body: String,
 ) -> JsResponse
 
-@external(javascript, "./workers_ffi.mts", "bytesResponse")
+@external(javascript, "./worker_ffi.mts", "bytesResponse")
 fn js_bytes_response(
   status: Int,
   headers: Array(#(String, String)),
   body: BitArray,
 ) -> JsResponse
 
-@external(javascript, "./workers_ffi.mts", "streamResponse")
+@external(javascript, "./worker_ffi.mts", "streamResponse")
 fn js_stream_response(
   status: Int,
   headers: Array(#(String, String)),
   body: ReadableStream,
 ) -> JsResponse
 
-@external(javascript, "./workers_ffi.mts", "emptyResponse")
+@external(javascript, "./worker_ffi.mts", "emptyResponse")
 fn js_empty_response(
   status: Int,
   headers: Array(#(String, String)),

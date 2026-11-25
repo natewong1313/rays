@@ -9,10 +9,10 @@ import gleam/http/request
 import gleam/javascript/promise.{type Promise}
 import gleam/result
 import rays/fetch.{type Target}
-import rays/workers.{type Context, type Env, type Request, type Response}
+import rays/worker.{type Context, type Env, type Request, type Response}
 
-pub fn main() -> workers.Worker {
-  workers.new(handle_request)
+pub fn main() -> worker.Worker {
+  worker.new(handle_request)
 }
 
 pub fn handle_request(
@@ -20,28 +20,28 @@ pub fn handle_request(
   env: Env,
   _ctx: Context,
 ) -> Promise(Response) {
-  case workers.path_segments(req) {
+  case worker.path_segments(req) {
     ["api", "greeting"] -> greeting(req, env)
     ["api", "whoami"] -> whoami(req, env)
-    _ -> promise.resolve(workers.not_found())
+    _ -> promise.resolve(worker.not_found())
   }
 }
 
 // GET /api/greeting — greets the user by the name the TypeScript Worker
 // gives.
 fn greeting(req: Request, env: Env) -> Promise(Response) {
-  use <- workers.require_method(req, Get)
+  use <- worker.require_method(req, Get)
   use web <- require_service(env, "WEB")
   use result <- promise.await(fetch.send(get("/whoami"), to: web))
   case result {
-    Error(_) -> promise.resolve(workers.response(502))
+    Error(_) -> promise.resolve(worker.response(502))
     Ok(response) -> {
       use name <- promise.map(fetch.read_text(response))
       case name {
         Ok(name) ->
-          workers.ok()
-          |> workers.string_body("Hello, " <> name <> ", from Gleam!")
-        Error(_) -> workers.response(502)
+          worker.ok()
+          |> worker.string_body("Hello, " <> name <> ", from Gleam!")
+        Error(_) -> worker.response(502)
       }
     }
   }
@@ -50,14 +50,14 @@ fn greeting(req: Request, env: Env) -> Promise(Response) {
 // GET /api/whoami — passes the TypeScript Worker's answer straight on,
 // without reading it.
 fn whoami(req: Request, env: Env) -> Promise(Response) {
-  use <- workers.require_method(req, Get)
+  use <- worker.require_method(req, Get)
   use web <- require_service(env, "WEB")
   use result <- promise.map(fetch.send(get("/whoami"), to: web))
   case result {
     Ok(response) ->
       fetch.forward(response)
-      |> result.unwrap(workers.internal_server_error())
-    Error(_) -> workers.response(502)
+      |> result.unwrap(worker.internal_server_error())
+    Error(_) -> worker.response(502)
   }
 }
 
@@ -71,14 +71,14 @@ fn require_service(
 ) -> Promise(Response) {
   case fetch.service(env, name) {
     Ok(target) -> next(target)
-    Error(_) -> promise.resolve(workers.internal_server_error())
+    Error(_) -> promise.resolve(worker.internal_server_error())
   }
 }
 
 /// A `GET` request for the given path. A service binding ignores the host.
 ///
-fn get(path: String) -> request.Request(workers.Body) {
+fn get(path: String) -> request.Request(worker.Body) {
   request.new()
   |> request.set_path(path)
-  |> request.set_body(workers.Empty)
+  |> request.set_body(worker.Empty)
 }

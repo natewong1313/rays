@@ -65,7 +65,7 @@ export interface Project {
   /** The Gleam package's name, which is also its default Worker module. */
   packageName: string;
   /**
-   * The project's RPC methods, for `rays/workers_rpc`, or `undefined` if it
+   * The project's RPC methods, for `rays/worker_rpc`, or `undefined` if it
    * has none. A Worker's entry module then serves them.
    */
   rpc: RpcBuild | undefined;
@@ -73,7 +73,7 @@ export interface Project {
    * The absolute path of the compiled JavaScript for a Worker module.
    *
    * @throws {BuildError} If the module doesn't exist, or has no
-   *   `pub fn main() -> workers.Worker`.
+   *   `pub fn main() -> worker.Worker`.
    */
   workerModule(module: string): string;
 }

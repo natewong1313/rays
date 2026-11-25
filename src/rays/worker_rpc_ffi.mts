@@ -1,4 +1,4 @@
-// FFI shim for `rays/workers_rpc`: the registry the build fills in, the codec
+// FFI shim for `rays/worker_rpc`: the registry the build fills in, the codec
 // that turns Gleam values into data Workers RPC can copy, and both ends of a
 // call.
 //
@@ -34,8 +34,8 @@ import type { BitArray, List, Result } from "../gleam.mjs";
 import Dict from "../../gleam_stdlib/dict.mjs";
 // @ts-ignore
 import * as gleamDict from "../../gleam_stdlib/gleam/dict.mjs";
-import { describeError } from "./workers_ffi.mts";
-import type { Env, Worker } from "./workers_ffi.mts";
+import { describeError } from "./worker_ffi.mts";
+import type { Env, Worker } from "./worker_ffi.mts";
 
 type GleamDict = { readonly __dict: unique symbol };
 
@@ -107,7 +107,7 @@ register("gleam", {
   Error: Result$Error(0).constructor,
 });
 
-// Register an RPC method: a public function taking `workers_rpc.Params`.
+// Register an RPC method: a public function taking `worker_rpc.Params`.
 // The version changes whenever the method's argument or reply types do, so
 // two Workers built from different versions don't silently disagree.
 export function registerMethod(
@@ -281,7 +281,7 @@ export function checkWorker(worker: RpcWorker): void {
   for (const method of worker[METHODS]?.keys() ?? []) {
     if (!registry().methods.has(method)) {
       throw new TypeError(
-        "workers_rpc.bind was given a function that isn't an RPC method. A method must be a public function in this package whose only argument is a workers_rpc.Params.",
+        "worker_rpc.bind was given a function that isn't an RPC method. A method must be a public function in this package whose only argument is a worker_rpc.Params.",
       );
     }
   }
@@ -352,7 +352,7 @@ export async function serve(
 
 // Calling
 
-// A stand-in binding from `rays/workers/simulate`, which calls the bound
+// A stand-in binding from `rays/worker/simulate`, which calls the bound
 // Worker's handler directly instead of going through Workers RPC.
 const SIMULATED = Symbol.for("rays.rpc.simulated");
 
@@ -377,7 +377,7 @@ export function service(env: Env, name: string): Result<Service, undefined> {
     : Result$Error(undefined);
 }
 
-// What went wrong, as `#(kind, method, message)`, for `rays/workers_rpc` to
+// What went wrong, as `#(kind, method, message)`, for `rays/worker_rpc` to
 // turn into a `CallError`.
 type Failure = [string, string, string];
 

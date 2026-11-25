@@ -8,7 +8,7 @@ export function checkModuleName(module: string): void {
   if (!isModuleName(module)) throw new BuildError(notAModuleName(module));
 }
 
-// Check that a module has `pub fn main() -> workers.Worker`, using the types
+// Check that a module has `pub fn main() -> worker.Worker`, using the types
 // Gleam reports, so mistakes show up here rather than when the Worker runs.
 export function checkWorkerModule(
   module: string,
@@ -24,7 +24,7 @@ export function checkWorkerModule(
   const main = moduleInterface.functions["main"];
   if (main === undefined) {
     throw new BuildError(
-      `${source} has no public main function. Add \`pub fn main() -> workers.Worker\` that returns workers.new(...).`,
+      `${source} has no public main function. Add \`pub fn main() -> worker.Worker\` that returns worker.new(...).`,
     );
   }
   if (main.parameters.length > 0) {
@@ -35,11 +35,11 @@ export function checkWorkerModule(
   if (
     returned.kind !== "named" ||
     returned.package !== "rays" ||
-    returned.module !== "rays/workers" ||
+    returned.module !== "rays/worker" ||
     returned.name !== "Worker"
   ) {
     throw new BuildError(
-      `main in ${source} must return a workers.Worker, but it returns ${describeType(returned)}.`,
+      `main in ${source} must return a worker.Worker, but it returns ${describeType(returned)}.`,
     );
   }
   if (!main.implementations["can-run-on-javascript"]) {

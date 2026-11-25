@@ -1,4 +1,4 @@
-// Tests the build step behind `rays/workers_rpc` against a real Gleam
+// Tests the build step behind `rays/worker_rpc` against a real Gleam
 // compiler: the footers that register custom types and methods, method
 // versions, the codec, and entry modules that serve methods. Calls go
 // through `structuredClone`, which is how Workers RPC copies values.
@@ -19,7 +19,7 @@ import gleam/javascript/promise
 import gleam/option.{type Option, None, Some}
 import gleam/set.{type Set}
 import gleam/string
-import rays/workers_rpc
+import rays/worker_rpc
 
 pub type Shape {
   Circle(radius: Float)
@@ -62,33 +62,33 @@ pub fn sample() -> Values {
   )
 }
 
-pub fn echo_values(params: workers_rpc.Params(Values)) -> promise.Promise(Values) {
+pub fn echo_values(params: worker_rpc.Params(Values)) -> promise.Promise(Values) {
   promise.resolve(params.args)
 }
 
-pub fn crash(_params: workers_rpc.Params(Nil)) -> promise.Promise(Nil) {
+pub fn crash(_params: worker_rpc.Params(Nil)) -> promise.Promise(Nil) {
   panic as "it crashed"
 }
 
 // Takes a Params but isn't a method, because it takes something else too.
-pub fn describe(params: workers_rpc.Params(Values), label: String) -> String {
+pub fn describe(params: worker_rpc.Params(Values), label: String) -> String {
   label <> params.args.text
 }
 `;
 
 const app = `import app/values
 import gleam/javascript/promise
-import rays/workers
-import rays/workers_rpc
+import rays/worker
+import rays/worker_rpc
 
-pub fn main() -> workers.Worker {
-  workers.new(fn(_request, _env, _context) {
-    workers.ok()
-    |> workers.string_body("Hello from app")
+pub fn main() -> worker.Worker {
+  worker.new(fn(_request, _env, _context) {
+    worker.ok()
+    |> worker.string_body("Hello from app")
     |> promise.resolve
   })
-  |> workers_rpc.bind(values.echo_values)
-  |> workers_rpc.bind(values.crash)
+  |> worker_rpc.bind(values.echo_values)
+  |> worker_rpc.bind(values.crash)
 }
 `;
 
@@ -109,7 +109,7 @@ async function load(file: string) {
 const runtime = async () => ({
   ffi: await import(
     /* @vite-ignore */ pathToFileURL(
-      javascript("rays", "rays", "workers_rpc_ffi.mts"),
+      javascript("rays", "rays", "worker_rpc_ffi.mts"),
     ).href
   ),
   isEqual: (
@@ -166,7 +166,7 @@ describe("footers", () => {
     await fixture.write("src/app/values.gleam", "pub type Shape {\n  Dot\n}\n");
     await fixture.write(
       "src/app.gleam",
-      "import gleam/javascript/promise\nimport rays/workers\n\npub fn main() -> workers.Worker {\n  workers.new(fn(_, _, _) { promise.resolve(workers.ok()) })\n}\n",
+      "import gleam/javascript/promise\nimport rays/worker\n\npub fn main() -> worker.Worker {\n  worker.new(fn(_, _, _) { promise.resolve(worker.ok()) })\n}\n",
     );
     const project = await compile({ root: fixture.root });
 
@@ -229,13 +229,13 @@ pub fn make() -> Inner {
 `;
   const wrapper = (count: string) => `import app/inner.{type Inner}
 import gleam/javascript/promise
-import rays/workers_rpc
+import rays/worker_rpc
 
 pub opaque type Wrapper {
   Wrapper(inner: Inner, count: Int)
 }
 
-pub fn get(_params: workers_rpc.Params(Nil)) -> promise.Promise(Wrapper) {
+pub fn get(_params: worker_rpc.Params(Nil)) -> promise.Promise(Wrapper) {
   promise.resolve(Wrapper(inner.make(), ${count}))
 }
 `;
@@ -271,7 +271,7 @@ pub fn get(_params: workers_rpc.Params(Nil)) -> promise.Promise(Wrapper) {
     // rays is a path dependency of the fixture, and CallError is its type.
     await fixture.write(
       "src/app/reply.gleam",
-      "import gleam/javascript/promise\nimport rays/workers_rpc\n\npub fn get(_: workers_rpc.Params(Nil)) -> promise.Promise(workers_rpc.CallError) {\n  promise.resolve(workers_rpc.NotAMethod)\n}\n",
+      "import gleam/javascript/promise\nimport rays/worker_rpc\n\npub fn get(_: worker_rpc.Params(Nil)) -> promise.Promise(worker_rpc.CallError) {\n  promise.resolve(worker_rpc.NotAMethod)\n}\n",
     );
     const before = await version();
     await writeFile(
@@ -284,37 +284,37 @@ pub fn get(_params: workers_rpc.Params(Nil)) -> promise.Promise(Wrapper) {
 
 describe("methods that can't be used", () => {
   const method = (signature: string) =>
-    `import gleam/javascript/promise\nimport rays/workers_rpc\n\n${signature} {\n  panic\n}\n`;
+    `import gleam/javascript/promise\nimport rays/worker_rpc\n\n${signature} {\n  panic\n}\n`;
 
   it.each([
     [
       "generic",
-      "pub fn pick(_: workers_rpc.Params(a)) -> promise.Promise(Int)",
+      "pub fn pick(_: worker_rpc.Params(a)) -> promise.Promise(Int)",
       "is generic",
     ],
     [
       "sending a function",
-      "pub fn pick(_: workers_rpc.Params(Int)) -> promise.Promise(fn() -> Int)",
+      "pub fn pick(_: worker_rpc.Params(Int)) -> promise.Promise(fn() -> Int)",
       "sends a function",
     ],
     [
       "not returning a promise",
-      "pub fn pick(_: workers_rpc.Params(Int)) -> Int",
+      "pub fn pick(_: worker_rpc.Params(Int)) -> Int",
       "must return a Promise",
     ],
     [
       "named after a handler",
-      "pub fn fetch(_: workers_rpc.Params(Int)) -> promise.Promise(Int)",
+      "pub fn fetch(_: worker_rpc.Params(Int)) -> promise.Promise(Int)",
       "Cloudflare uses the name fetch",
     ],
     [
       "named after the entrypoint's env",
-      "pub fn env(_: workers_rpc.Params(Int)) -> promise.Promise(Int)",
+      "pub fn env(_: worker_rpc.Params(Int)) -> promise.Promise(Int)",
       "Cloudflare uses the name env",
     ],
     [
       "named after the entrypoint's ctx",
-      "pub fn ctx(_: workers_rpc.Params(Int)) -> promise.Promise(Int)",
+      "pub fn ctx(_: worker_rpc.Params(Int)) -> promise.Promise(Int)",
       "Cloudflare uses the name ctx",
     ],
   ])("fail the build: %s", async (_, signature, message) => {
@@ -465,7 +465,7 @@ describe("entry modules", () => {
     await writeProject();
     await fixture.write(
       "src/app.gleam",
-      app.replace("  |> workers_rpc.bind(values.crash)\n", ""),
+      app.replace("  |> worker_rpc.bind(values.crash)\n", ""),
     );
     const [entry] = await build({ root: fixture.root });
     const { default: Entrypoint } = await load(entry!.path);
@@ -489,8 +489,8 @@ describe("entry modules", () => {
       app
         .replace("import app/values\n", "import app/other\nimport app/values\n")
         .replace(
-          "workers_rpc.bind(values.echo_values)",
-          "workers_rpc.bind(other.echo_values)",
+          "worker_rpc.bind(values.echo_values)",
+          "worker_rpc.bind(other.echo_values)",
         ),
     );
     const [entry] = await build({ root: fixture.root });
@@ -529,7 +529,7 @@ describe("entry modules", () => {
     await writeProject();
     await fixture.write(
       "src/app/external.gleam",
-      'import gleam/javascript/promise\nimport rays/workers_rpc\n\n@external(javascript, "./external_ffi.mjs", "double")\npub fn double(params: workers_rpc.Params(Int)) -> promise.Promise(Int)\n',
+      'import gleam/javascript/promise\nimport rays/worker_rpc\n\n@external(javascript, "./external_ffi.mjs", "double")\npub fn double(params: worker_rpc.Params(Int)) -> promise.Promise(Int)\n',
     );
     await fixture.write(
       "src/app/external_ffi.mjs",
@@ -543,8 +543,8 @@ describe("entry modules", () => {
           "import app/external\nimport app/values\n",
         )
         .replace(
-          "  |> workers_rpc.bind(values.crash)\n",
-          "  |> workers_rpc.bind(external.double)\n",
+          "  |> worker_rpc.bind(values.crash)\n",
+          "  |> worker_rpc.bind(external.double)\n",
         ),
     );
     const [entry] = await build({ root: fixture.root });
@@ -569,7 +569,7 @@ describe("entry modules", () => {
   it("don't start when the only bound function isn't a method", async () => {
     await fixture.write(
       "src/app.gleam",
-      "import gleam/javascript/promise\nimport rays/workers\nimport rays/workers_rpc\n\npub fn main() -> workers.Worker {\n  workers.new(fn(_, _, _) { promise.resolve(workers.ok()) })\n  |> workers_rpc.bind(hidden)\n}\n\nfn hidden(_: workers_rpc.Params(Nil)) -> promise.Promise(Nil) {\n  promise.resolve(Nil)\n}\n",
+      "import gleam/javascript/promise\nimport rays/worker\nimport rays/worker_rpc\n\npub fn main() -> worker.Worker {\n  worker.new(fn(_, _, _) { promise.resolve(worker.ok()) })\n  |> worker_rpc.bind(hidden)\n}\n\nfn hidden(_: worker_rpc.Params(Nil)) -> promise.Promise(Nil) {\n  promise.resolve(Nil)\n}\n",
     );
     const [entry] = await build({ root: fixture.root });
     await expect(load(entry!.path)).rejects.toThrow("isn't an RPC method");
@@ -581,11 +581,11 @@ describe("entry modules", () => {
       "src/app.gleam",
       app
         .replace(
-          "  |> workers_rpc.bind(values.crash)\n",
-          "  |> workers_rpc.bind(hidden)\n",
+          "  |> worker_rpc.bind(values.crash)\n",
+          "  |> worker_rpc.bind(hidden)\n",
         )
         .concat(
-          "\nfn hidden(_: workers_rpc.Params(Nil)) -> promise.Promise(Nil) {\n  promise.resolve(Nil)\n}\n",
+          "\nfn hidden(_: worker_rpc.Params(Nil)) -> promise.Promise(Nil) {\n  promise.resolve(Nil)\n}\n",
         ),
     );
     const [entry] = await build({ root: fixture.root });

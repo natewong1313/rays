@@ -7,15 +7,15 @@ import gleam/javascript/promise.{type Promise}
 import gleeunit
 import greeter
 import greeter/names
-import rays/workers.{type Response}
-import rays/workers/simulate
+import rays/worker.{type Response}
+import rays/worker/simulate
 
 pub fn main() -> Nil {
   gleeunit.main()
 }
 
 /// An environment where `NAMES` is bound to the names Worker.
-fn env() -> workers.Env {
+fn env() -> worker.Env {
   simulate.env()
   |> simulate.with_rpc_service(
     "NAMES",
@@ -28,7 +28,7 @@ fn env() -> workers.Env {
 fn send(
   method: http.Method,
   path: String,
-  env: workers.Env,
+  env: worker.Env,
 ) -> Promise(Response) {
   greeter.handle_request(
     simulate.request(method, path),

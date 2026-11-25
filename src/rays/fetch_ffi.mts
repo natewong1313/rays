@@ -7,8 +7,8 @@
 
 import { Result$Error, Result$Ok } from "../gleam.mjs";
 import type { BitArray, Result } from "../gleam.mjs";
-import { describeError, toUint8Array } from "./workers_ffi.mts";
-import type { Env, Header } from "./workers_ffi.mts";
+import { describeError, toUint8Array } from "./worker_ffi.mts";
+import type { Env, Header } from "./worker_ffi.mts";
 
 // Anything with a Fetch-compatible `fetch` method: the global `fetch`, or a
 // service binding.
