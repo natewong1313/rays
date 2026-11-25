@@ -434,7 +434,7 @@ describe("entry modules", () => {
   it("serve each method from a WorkerEntrypoint", async () => {
     const { source, instance } = await serve();
     expect(source).toContain(
-      'import { WorkerEntrypoint } from "cloudflare:workers";',
+      'import { WorkerEntrypoint as $rays_WorkerEntrypoint } from "cloudflare:workers";',
     );
     expect(source).toContain("echo_values(call: any) {");
     const response = await instance.fetch(new Request("https://example.com/"));

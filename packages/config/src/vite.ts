@@ -28,12 +28,16 @@
  * compile is shown in the terminal and the browser's error overlay, and the
  * last good build keeps running. `vite build` fails instead.
  *
+ * The module also exports a class for each Durable Object class in the
+ * project, from `rays/durable_object`.
+ *
  * It works with Cloudflare's Vite plugin v1 (`main` in a Wrangler config
  * file) and v2 (`worker.entrypoint` in `cloudflare.config.ts`). For tests,
  * add it before `cloudflareTest()` in `vitest.config.ts`. Cloudflare's Vitest
- * plugin then warns that it can't analyze the exports of the virtual module;
- * that only matters for Durable Objects and named entrypoints, which rays
- * Workers don't export.
+ * plugin then warns that it can't analyze the exports of the virtual module.
+ * It finds Durable Object classes in the configuration's `exports` instead,
+ * where `raysWorker()` declares them, so the warning only matters for named
+ * entrypoints, which rays Workers don't export.
  *
  * With `cloudflare.config.ts`, use `raysWorker()` from `@rays/config/cf`
  * to configure the Worker; it sets `entrypoint`.
@@ -121,45 +125,48 @@ export function rays(options: RaysOptions = {}): Plugin {
     recheckWorkers(good);
   }
 
-  // Whether each loaded Worker module failed its check in the last build.
-  const broken = new Map<string, boolean>();
-
-  // The names of the last build's RPC methods, which the entry modules
-  // depend on.
-  let rpcMethods: string | undefined;
+  // The source each loaded Worker module had in the last build, or
+  // `undefined` if its check failed.
+  const loaded = new Map<string, string | undefined>();
 
   // Vite reloads changed Gleam code itself, but it doesn't reload a virtual
-  // module, which is where a Worker module is checked. Check the loaded ones
-  // again, and reload a Worker whose check started or stopped failing, or
-  // all of them when the RPC methods change.
+  // module, which is where a Worker module is checked and its RPC methods
+  // and Durable Object classes are generated. Generate the loaded ones
+  // again, and reload a Worker whose module changed, or whose check started
+  // or stopped failing.
 
   function recheckWorkers(project: Project): void {
-    const methods = JSON.stringify(
-      project.rpc?.methods.map((method) => method.name) ?? [],
-    );
-    const rpcChanged = rpcMethods !== undefined && rpcMethods !== methods;
-    rpcMethods = methods;
     if (server === undefined) return;
     for (const environment of Object.values(server.environments)) {
       let reload = false;
       for (const [id, node] of environment.moduleGraph.idToModuleMap) {
         if (!id.startsWith(RESOLVED_PREFIX)) continue;
-        const module = moduleFor(id, project);
-        let failed = false;
+        let source: string | undefined;
         try {
-          project.workerModule(module);
+          source = workerSource(id, project);
         } catch (error) {
-          failed = true;
           report(error as Error);
         }
-        if (broken.get(id) !== failed || rpcChanged) {
-          broken.set(id, failed);
+        if (!loaded.has(id) || loaded.get(id) !== source) {
+          loaded.set(id, source);
           environment.moduleGraph.invalidateModule(node);
           reload = true;
         }
       }
       if (reload) environment.hot.send({ type: "full-reload" });
     }
+  }
+
+  // The source of the Worker module `id`.
+  function workerSource(id: string, project: Project): string {
+    const module = moduleFor(id, project);
+    return entrySource(module, project.workerModule(module), {
+      generator: "the rays Vite plugin",
+      typescript: false,
+      rpc: project.rpc,
+      durableObjects: project.durableObjects,
+      specifier: toSpecifier,
+    });
   }
 
   function moduleFor(id: string, project: Project): string {
@@ -230,23 +237,14 @@ export function rays(options: RaysOptions = {}): Plugin {
       await (tail ?? schedule());
       if (good === undefined) throw failure;
 
-      const module = moduleFor(id, good);
-      let compiled: string;
       try {
-        compiled = good.workerModule(module);
-        broken.set(id, false);
+        const source = workerSource(id, good);
+        loaded.set(id, source);
+        return source;
       } catch (error) {
-        broken.set(id, true);
+        loaded.set(id, undefined);
         throw error;
       }
-      return entrySource(module, toSpecifier(compiled), {
-        generator: "the rays Vite plugin",
-        typescript: false,
-        rpc: good.rpc && {
-          methods: good.rpc.methods.map((method) => method.name),
-          specifier: toSpecifier(good.rpc.ffi),
-        },
-      });
     },
   };
 }

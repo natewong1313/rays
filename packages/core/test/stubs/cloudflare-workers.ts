@@ -11,3 +11,13 @@ export class WorkerEntrypoint {
     this.env = env;
   }
 }
+
+export class DurableObject {
+  protected ctx: unknown;
+  protected env: unknown;
+
+  constructor(ctx: unknown, env: unknown) {
+    this.ctx = ctx;
+    this.env = env;
+  }
+}

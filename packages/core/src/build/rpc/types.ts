@@ -2,13 +2,13 @@
 
 import type { ModuleInterface } from "../package-interface.ts";
 
-/** A build failure with a message meant for the developer. */
-export class RpcBuildError extends Error {
-  override name = "RpcBuildError";
-}
-
-/** An RPC method: a public function taking `worker_rpc.Params`. */
+/**
+ * An RPC method: a public function taking `worker_rpc.Params`, or
+ * `durable_object.Params` for a method of a Durable Object class.
+ */
 export interface RpcMethod {
+  /** Whether a Worker or a Durable Object class serves it. */
+  kind: "worker" | "durable_object";
   /** The Gleam module it is defined in. */
   module: string;
   /** Its name, which is also the name of the Workers RPC method. */

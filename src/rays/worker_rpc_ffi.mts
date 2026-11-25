@@ -61,7 +61,7 @@ const dicts = () =>
 // still be uninitialized then.
 
 type Constructor = new (...fields: unknown[]) => unknown;
-type MethodFunction = (params: unknown) => Promise<unknown>;
+export type MethodFunction = (params: unknown) => Promise<unknown>;
 
 interface MethodInfo {
   readonly module: string;
@@ -72,12 +72,26 @@ interface MethodInfo {
 interface Registry {
   readonly constructors: Map<string, Constructor>;
   readonly methods: Map<MethodFunction, MethodInfo>;
+  // `rays/durable_object`'s classes, by the name of the class the entry
+  // module exports: the function that defines each, and the other way
+  // around. A module evaluated again, as in development, registers its new
+  // function in its place, while code holding the old one still finds the
+  // class's name.
+  readonly classes: Map<string, ClassFunction>;
+  readonly classNames: Map<ClassFunction, string>;
 }
+
+export type ClassFunction = () => unknown;
 
 function registry(): Registry {
   const key = Symbol.for("rays.rpc.registry");
   const store = globalThis as unknown as Record<symbol, Registry | undefined>;
-  return (store[key] ??= { constructors: new Map(), methods: new Map() });
+  return (store[key] ??= {
+    constructors: new Map(),
+    methods: new Map(),
+    classes: new Map(),
+    classNames: new Map(),
+  });
 }
 
 // The property a registered class's prototype holds its id in. A function,
@@ -117,6 +131,26 @@ export function registerMethod(
   version: string,
 ) {
   registry().methods.set(method, { module, name, version });
+}
+
+// Register a `rays/durable_object` class: a public function that returns a
+// `DurableObject`, and the name of the class the entry module exports for it.
+export function registerClass(className: string, classFunction: ClassFunction) {
+  registry().classes.set(className, classFunction);
+  registry().classNames.set(classFunction, className);
+}
+
+// The function that defines the class with this name, if rays registered
+// one.
+export function registeredClass(className: string): ClassFunction | undefined {
+  return registry().classes.get(className);
+}
+
+// The name of the class a function defines, if rays registered it.
+export function registeredClassName(
+  classFunction: ClassFunction,
+): string | undefined {
+  return registry().classNames.get(classFunction);
 }
 
 // Codec
@@ -278,12 +312,19 @@ export function bind(
 // The generated entry module calls this, so a mistake stops the Worker from
 // starting rather than failing calls later.
 export function checkWorker(worker: RpcWorker): void {
-  for (const method of worker[METHODS]?.keys() ?? []) {
-    if (!registry().methods.has(method)) {
-      throw new TypeError(
-        "worker_rpc.bind was given a function that isn't an RPC method. A method must be a public function in this package whose only argument is a worker_rpc.Params.",
-      );
-    }
+  checkMethods(
+    worker[METHODS]?.keys() ?? [],
+    "worker_rpc.bind was given a function that isn't an RPC method. A method must be a public function in this package whose only argument is a worker_rpc.Params.",
+  );
+}
+
+// Throw `message` if any of the methods isn't one rays registered.
+export function checkMethods(
+  methods: Iterable<MethodFunction>,
+  message: string,
+): void {
+  for (const method of methods) {
+    if (!registry().methods.has(method)) throw new TypeError(message);
   }
 }
 
@@ -291,21 +332,35 @@ export function checkWorker(worker: RpcWorker): void {
 
 // `m` is the module the method is defined in, as methods in different
 // modules can share a name, and so the entry method.
-type Call = { m: string; v: string; args: Wire };
+export type Call = { m: string; v: string; args: Wire };
 
-type Reply =
+export type Reply =
   | { ok: Wire }
   | { error: "not_bound" | "version_mismatch" }
   | { error: "handler" | "encode" | "decode"; message: string };
 
 // Handle a call to the method `name`. The generated entry module's
 // `WorkerEntrypoint` calls this from one method per RPC method.
-export async function serve(
+export function serve(
   worker: RpcWorker,
   name: string,
   call: Call,
   env: Env,
   ctx: ExecutionContext,
+): Promise<Reply> {
+  return serveMethods(worker[METHODS] ?? [], name, call, (handler, args) =>
+    handler(args, env, ctx),
+  );
+}
+
+// Handle a call to the method `name` with one of the bound `methods`, which
+// `invoke` runs. `rays/durable_object` serves its classes' methods with
+// this too, with handlers that also take the instance's memory.
+export async function serveMethods<H>(
+  methods: Iterable<[MethodFunction, H]>,
+  name: string,
+  call: Call,
+  invoke: (handler: H, args: unknown) => Promise<unknown>,
 ): Promise<Reply> {
   if (
     typeof call !== "object" ||
@@ -320,8 +375,8 @@ export async function serve(
     };
   }
 
-  let found: [Handler, MethodInfo] | undefined;
-  for (const [method, handler] of worker[METHODS] ?? []) {
+  let found: [H, MethodInfo] | undefined;
+  for (const [method, handler] of methods) {
     const info = registry().methods.get(method);
     if (info?.name === name && info.module === call.m) found = [handler, info];
   }
@@ -338,7 +393,7 @@ export async function serve(
 
   let reply: unknown;
   try {
-    reply = await handler(args, env, ctx);
+    reply = await invoke(handler, args);
   } catch (error) {
     return { error: "handler", message: message(error) };
   }
@@ -378,14 +433,36 @@ export function service(env: Env, name: string): Result<Service, undefined> {
 }
 
 // What went wrong, as `#(kind, method, message)`, for `rays/worker_rpc` to
-// turn into a `CallError`.
-type Failure = [string, string, string];
+// turn into a `CallError`. `rays/durable_object` adds kinds of its own, for
+// failures only a Durable Object has.
+export type FailureKind =
+  | "not_a_method"
+  | "not_bound"
+  | "version_mismatch"
+  | "handler"
+  | "encode"
+  | "decode"
+  | "send";
 
-export async function call(
+export type Failure<Kind extends string = FailureKind> = [Kind, string, string];
+
+export function call(
   service: Service,
   method: MethodFunction,
   args: unknown,
 ): Promise<Result<unknown, Failure>> {
+  return callWith(service, method, args, () => "send");
+}
+
+// `call`, with `sendFailure` saying what kind of failure an exception the
+// runtime threw while sending the call is. `rays/durable_object` uses it to
+// tell its own failures apart.
+export async function callWith<Kind extends string>(
+  service: Service,
+  method: MethodFunction,
+  args: unknown,
+  sendFailure: (error: unknown) => Kind | "send",
+): Promise<Result<unknown, Failure<Kind | FailureKind>>> {
   // Own properties only: an RPC stub is a proxy that has every property.
   if (Object.prototype.hasOwnProperty.call(service, SIMULATED)) {
     return callSimulated(service[SIMULATED]!, method, args);
@@ -394,8 +471,8 @@ export async function call(
   const registered = registry().methods.get(method);
   if (registered === undefined) return Result$Error(["not_a_method", "", ""]);
   const { module, name, version } = registered;
-  const fail = (kind: string, detail = "") =>
-    Result$Error<unknown, Failure>([kind, name, detail]);
+  const fail = (kind: Kind | FailureKind, detail = "") =>
+    Result$Error<unknown, Failure<Kind | FailureKind>>([kind, name, detail]);
 
   let wire: Wire;
   try {
@@ -414,7 +491,7 @@ export async function call(
   try {
     reply = await stub[name]!({ m: module, v: version, args: wire });
   } catch (error) {
-    return fail("send", message(error));
+    return fail(sendFailure(error), message(error));
   }
 
   const checked = checkReply(reply);

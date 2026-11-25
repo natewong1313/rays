@@ -97,6 +97,19 @@ describe("in development", () => {
     expect(code).toContain("src/admin.gleam");
   });
 
+  it("exports the project's Durable Object classes", async () => {
+    await fixture.write(
+      "src/app/room.gleam",
+      "import gleam/javascript/promise.{type Promise}\nimport rays/durable_object\n\npub fn room() -> durable_object.DurableObject(Int) {\n  durable_object.new(0)\n  |> durable_object.bind(count)\n}\n\npub fn count(params: durable_object.Params(Nil, Int)) -> Promise(Int) {\n  promise.resolve(durable_object.read_memory(params.memory))\n}\n",
+    );
+    const { server } = await start();
+    // Loaded but not imported: Node.js has no cloudflare:workers.
+    const loaded = await server.pluginContainer.load("\0virtual:rays/worker");
+    const code = typeof loaded === "string" ? loaded : loaded?.code;
+    expect(code).toContain("export { $rays_class_Room as Room };");
+    expect(code).toContain("  count(call) {");
+  });
+
   it("accepts the path Cloudflare's Vitest plugin asks for", async () => {
     const { load } = await start();
     const fetch = await load(path.join(fixture.root, "virtual:rays/worker"));

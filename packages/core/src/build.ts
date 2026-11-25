@@ -10,19 +10,38 @@
  * @module
  */
 
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { BuildError } from "./build/error.ts";
+import { findDurableObjectClasses } from "./build/durable-object.ts";
 import { entrySource } from "./build/entry.ts";
 import { relativeSpecifier, writeIfChanged } from "./build/files.ts";
-import { readInterface, readPackageName, runGleam } from "./build/gleam.ts";
-import { buildRpc, RpcBuildError, type RpcBuild } from "./build/rpc/build.ts";
+import {
+  gleamBinary,
+  noGleamToml,
+  readInterface,
+  readInterfaceSync,
+  readPackageName,
+  runGleam,
+} from "./build/gleam.ts";
+import {
+  buildRpc,
+  type DurableObjects,
+  type WorkerRpc,
+} from "./build/rpc/build.ts";
 import { checkModuleName, checkWorkerModule } from "./build/worker-module.ts";
 
 export { BuildError } from "./build/error.ts";
-export { entrySource, type EntryRpc } from "./build/entry.ts";
+export { entrySource, type EntryOptions } from "./build/entry.ts";
 export { readPackageName } from "./build/gleam.ts";
 export { isModuleName, notAModuleName } from "./build/module-name.ts";
+export type { DurableObjectClass } from "./build/durable-object.ts";
+export type {
+  BuiltDurableObjectClass,
+  DurableObjects,
+  RpcMethod,
+  WorkerRpc,
+} from "./build/rpc/build.ts";
 
 /** The directory, next to `gleam.toml`, that `rays build` writes into. */
 const OUTPUT_DIR = ".rays";
@@ -65,10 +84,15 @@ export interface Project {
   /** The Gleam package's name, which is also its default Worker module. */
   packageName: string;
   /**
-   * The project's RPC methods, for `rays/worker_rpc`, or `undefined` if it
-   * has none. A Worker's entry module then serves them.
+   * The project's Workers RPC methods, for `rays/worker_rpc`, or `undefined`
+   * if it has none. A Worker's entry module then serves them.
    */
-  rpc: RpcBuild | undefined;
+  rpc: WorkerRpc | undefined;
+  /**
+   * The project's Durable Object classes, for `rays/durable_object`, or
+   * `undefined` if it has none. Every Worker's entry module exports them.
+   */
+  durableObjects: DurableObjects | undefined;
   /**
    * The absolute path of the compiled JavaScript for a Worker module.
    *
@@ -87,23 +111,22 @@ export interface Project {
 export async function compile(options: CompileOptions): Promise<Project> {
   const root = path.resolve(options.root);
   const packageName = await readPackageName(root);
-  const gleam = options.gleam ?? process.env["RAYS_GLEAM_BIN"] ?? "gleam";
+  const gleam = gleamBinary(options.gleam);
   await runGleam(gleam, root, ["build", "--target", "javascript"], {
     output: options.output ?? "inherit",
   });
   const modules = await readInterface(gleam, root);
-  let rpc: RpcBuild | undefined;
-  try {
-    rpc = await buildRpc({ root, packageName, modules });
-  } catch (error) {
-    if (error instanceof RpcBuildError) throw new BuildError(error.message);
-    throw error;
-  }
+  const { rpc, durableObjects } = await buildRpc({
+    root,
+    packageName,
+    modules,
+  });
 
   return {
     root,
     packageName,
     rpc,
+    durableObjects,
     workerModule(module) {
       checkModuleName(module);
       checkWorkerModule(module, modules[module]);
@@ -142,18 +165,15 @@ export async function build(options: BuildOptions): Promise<Entry[]> {
   const outputs = modules.map((module) => {
     const compiled = project.workerModule(module);
     const entry = path.join(root, OUTPUT_DIR, `${module}.entry.ts`);
-    const specifier = relativeSpecifier(path.dirname(entry), compiled);
-    const rpc = project.rpc && {
-      methods: project.rpc.methods.map((method) => method.name),
-      specifier: relativeSpecifier(path.dirname(entry), project.rpc.ffi),
-    };
     return {
       module,
       path: entry,
-      source: entrySource(module, specifier, {
+      source: entrySource(module, compiled, {
         generator: "rays build",
         typescript: true,
-        rpc,
+        rpc: project.rpc,
+        durableObjects: project.durableObjects,
+        specifier: (file) => relativeSpecifier(path.dirname(entry), file),
       }),
     };
   });
@@ -167,4 +187,26 @@ export async function build(options: BuildOptions): Promise<Entry[]> {
     entries.push({ module, path: entry, changed });
   }
   return entries;
+}
+
+/**
+ * The class names of the project's Durable Object classes, as the entry
+ * modules export them, sorted.
+ *
+ * It is synchronous, for configuration that is evaluated synchronously, such
+ * as `raysWorker()`'s. Gleam compiles the project to read its types, so it
+ * takes as long as a build.
+ *
+ * @throws {BuildError} If there is no `gleam.toml` in `root`, the project
+ *   fails to compile, or a class can't be used, for example because two have
+ *   the same name.
+ */
+export function readDurableObjectClasses(options: {
+  root: string;
+  gleam?: string | undefined;
+}): string[] {
+  const root = path.resolve(options.root);
+  if (!existsSync(path.join(root, "gleam.toml"))) throw noGleamToml(root);
+  const modules = readInterfaceSync(gleamBinary(options.gleam), root);
+  return findDurableObjectClasses(modules).map((object) => object.className);
 }

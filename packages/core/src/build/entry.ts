@@ -1,33 +1,74 @@
 // The source of the entry modules that `rays build` and the Vite plugin write.
 
-/** What an entry module needs to serve a project's RPC methods. */
-export interface EntryRpc {
-  /** The names of the project's RPC methods. */
-  methods: readonly string[];
-  /** The import specifier of `rays/worker_rpc`'s FFI module. */
-  specifier: string;
+import type { DurableObjects, WorkerRpc } from "./rpc/build.ts";
+
+/** The options of {@link entrySource}. */
+export interface EntryOptions {
+  /** What wrote the module, for its header comment. */
+  generator: string;
+  /** Whether to write TypeScript. */
+  typescript: boolean;
+  /** The project's Workers RPC methods, if it has any. */
+  rpc: WorkerRpc | undefined;
+  /** The project's Durable Object classes, if it has any. */
+  durableObjects: DurableObjects | undefined;
+  /** The import specifier, from the entry module, of a file in the build. */
+  specifier: (file: string) => string;
 }
 
 /**
  * The source of an entry module, which exports the Worker returned by `main`
- * in the compiled Gleam module that `specifier` imports.
+ * in the compiled Gleam module at `compiled`.
  *
  * With `rpc`, the default export is a `WorkerEntrypoint` class instead, with
  * one method for each of the project's RPC methods, since Workers RPC only
  * calls methods of that class. Methods the Worker doesn't bind reply that
  * they aren't bound.
  *
+ * With `durableObjects`, it also exports a `DurableObject` class for each of
+ * the project's Durable Object classes, with one method for each of the
+ * project's Durable Object methods.
+ *
  * The module is self-contained: it doesn't import `@rays/core`, so it
  * works in projects that only depend on Wrangler.
  */
 export function entrySource(
   module: string,
-  specifier: string,
-  {
-    generator,
-    typescript,
-    rpc,
-  }: { generator: string; typescript: boolean; rpc?: EntryRpc | undefined },
+  compiled: string,
+  options: EntryOptions,
+): string {
+  return (
+    workerSource(module, compiled, options) +
+    (options.durableObjects === undefined
+      ? ""
+      : objectsSource(options.durableObjects, options))
+  );
+}
+
+// One method for each name, which calls `body(name)`. Methods in different
+// modules can share a name: they share the entry method, and the call says
+// which module's method it is for.
+function methodsSource(
+  methods: readonly { name: string }[],
+  typescript: boolean,
+  body: (name: string) => string,
+): string {
+  const any = typescript ? ": any" : "";
+  return [...new Set(methods.map((method) => method.name))]
+    .map(
+      (name) => `
+  ${name}(call${any}) {
+    return ${body(JSON.stringify(name))};
+  }
+`,
+    )
+    .join("");
+}
+
+function workerSource(
+  module: string,
+  compiled: string,
+  { generator, typescript, rpc, specifier }: EntryOptions,
 ): string {
   const as = (type: string) => (typescript ? ` as ${type}` : "");
   const ignore = typescript ? "// @ts-ignore\n" : "";
@@ -57,7 +98,7 @@ if (
     // mistake. Checked here rather than with rays/worker_rpc's checkWorker,
     // so Workers without RPC don't load it.
     const unbound = `worker_rpc.bind was given a function that isn't an RPC method, and the project has none. A method must be a public function in this package whose only argument is a worker_rpc.Params.`;
-    return `${header}${ignore}import { main } from ${JSON.stringify(specifier)};
+    return `${header}${ignore}import { main } from ${JSON.stringify(specifier(compiled))};
 
 ${check}
 if (
@@ -79,32 +120,87 @@ export default worker;
 }`;
   }
 
-  const any = typescript ? ": any" : "";
-  // Methods in different modules can share a name: they share the entry
-  // method, and the call says which module's method it is for.
-  const methods = [...new Set(rpc.methods)]
-    .map(
-      (name) => `
-  ${name}(call${any}) {
-    return serve(worker, ${JSON.stringify(name)}, call, this.env, this.ctx);
-  }
-`,
-    )
-    .join("");
+  const methods = methodsSource(
+    rpc.methods,
+    typescript,
+    (name) => `serve(worker, ${name}, call, this.env, this.ctx)`,
+  );
   return `${header}// Workers RPC only calls methods of a WorkerEntrypoint class, so the Worker
 // is served from one, with a method for each RPC method in the project.
-${ignore}import { WorkerEntrypoint } from "cloudflare:workers";
-${ignore}import { main } from ${JSON.stringify(specifier)};
-${ignore}import { checkWorker, serve } from ${JSON.stringify(rpc.specifier)};
+${ignore}import { WorkerEntrypoint as $rays_WorkerEntrypoint } from "cloudflare:workers";
+${ignore}import { main } from ${JSON.stringify(specifier(compiled))};
+${ignore}import { checkWorker, serve } from ${JSON.stringify(specifier(rpc.ffi))};
 
 ${check}
 // Fails if a bound method isn't one rays found, so the Worker doesn't start.
 checkWorker(worker);
 
-export default class extends WorkerEntrypoint {
+export default class extends $rays_WorkerEntrypoint {
   fetch(request${typescript ? ": Request" : ""}) {
     return (worker${as("{ fetch: Function }")}).fetch(request, this.env, this.ctx);
   }
 ${methods}}
 `;
+}
+
+// The Durable Object classes. Each is declared under a name of its own,
+// starting with `$rays_`, which no Gleam name can, and exported under its
+// class name. So no name the module declares can clash with another, or hide
+// a global the module uses, such as `Symbol`.
+//
+// The modules that define the classes are imported for their footers, which
+// register each class's function under its class name: `$rays_check` finds
+// it there, and `durable_object.exported` finds the class name from it.
+function objectsSource(
+  objects: DurableObjects,
+  { typescript, specifier }: EntryOptions,
+): string {
+  const ignore = typescript ? "// @ts-ignore\n" : "";
+  const any = typescript ? ": any" : "";
+  const imports = [...new Set(objects.classes.map((object) => object.compiled))]
+    .map(
+      (compiled) => `${ignore}import ${JSON.stringify(specifier(compiled))};\n`,
+    )
+    .join("");
+  const classes = objects.classes
+    .map((object) => {
+      const name = JSON.stringify(object.className);
+      const definition = `$rays_definition_${object.className}`;
+      const declared = `$rays_class_${object.className}`;
+      const source = `${object.function} in src/${object.module}.gleam`;
+      const served = methodsSource(
+        objects.methods,
+        typescript,
+        (method) =>
+          `$rays_serve(${definition}, this.#memory, ${method}, call, this.env, this.ctx)`,
+      );
+      return `
+// Fails if the function doesn't return a DurableObject, or a bound method
+// isn't one rays found, so the Worker doesn't start.
+const ${definition} = $rays_check(${name}, ${JSON.stringify(source)});
+
+class ${declared} extends $rays_DurableObject {
+  #memory${any};
+
+  constructor(ctx${any}, env${any}) {
+    super(ctx, env);
+    this.#memory = $rays_wake(${definition}, ctx, env);
+  }
+${served}}
+
+export { ${declared} as ${object.className} };
+`;
+    })
+    .join("");
+  return `
+// The project's Durable Object classes, each with a method for each Durable
+// Object method in the project. Methods a class doesn't bind reply that they
+// aren't bound.
+${ignore}import { DurableObject as $rays_DurableObject } from "cloudflare:workers";
+${ignore}import {
+  checkObject as $rays_check,
+  serveObject as $rays_serve,
+  wakeObject as $rays_wake,
+} from ${JSON.stringify(specifier(objects.ffi))};
+${imports}${classes}`;
 }

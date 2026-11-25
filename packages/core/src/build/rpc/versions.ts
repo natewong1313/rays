@@ -3,7 +3,8 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { TypeInterface } from "../package-interface.ts";
 import { stripFooter } from "./footers.ts";
-import { RpcBuildError, type RpcContext } from "./types.ts";
+import { BuildError } from "../error.ts";
+import type { RpcContext } from "./types.ts";
 
 // A method's version is a hash of its argument and reply types, and of
 // everything that decides how the values in them are encoded:
@@ -53,13 +54,13 @@ export class Versions {
     switch (type.kind) {
       case "variable":
         if (!inDefinition) {
-          throw new RpcBuildError(
+          throw new BuildError(
             `${where} is generic. An RPC method's argument and reply types must be concrete, so both Workers agree on them.`,
           );
         }
         return;
       case "fn":
-        throw new RpcBuildError(
+        throw new BuildError(
           `${where} sends a function, which can't be sent between Workers.`,
         );
       case "tuple":

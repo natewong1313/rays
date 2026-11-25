@@ -215,10 +215,16 @@ pub fn call(
   args: args,
 ) -> Promise(Result(reply, CallError)) {
   use outcome <- promise.map(js_call(service, method, args))
-  result.map_error(outcome, to_call_error)
+  result.map_error(outcome, failure_to_call_error)
 }
 
-fn to_call_error(failure: #(String, String, String)) -> CallError {
+/// Turn a failure reported by the FFI's `call` into a `CallError`. The
+/// kinds are the FFI's `FailureKind`; `"send"` is the last of them.
+/// `rays/durable_object`, which calls Durable Objects the same way, uses it
+/// for the failures they share with Workers RPC.
+///
+@internal
+pub fn failure_to_call_error(failure: #(String, String, String)) -> CallError {
   let #(kind, method, message) = failure
   case kind {
     "not_a_method" -> NotAMethod

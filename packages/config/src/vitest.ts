@@ -47,6 +47,7 @@ interface WorkerLike {
   compatibilityDate?: unknown;
   compatibilityFlags?: unknown;
   env?: unknown;
+  exports?: unknown;
 }
 
 /** What `cf/config`'s `defineConfig()` accepts, in any of its forms. */
@@ -88,7 +89,12 @@ export interface RaysTestWorkersOptions {
  * Each Worker is built as for a deployment: `rays build` writes its entry
  * module, and Vite bundles it into `.rays/test/<name>.js`. Its name,
  * compatibility date and flags come from its configuration, and so do its
- * `bindings.text()`, `bindings.json()` and `bindings.worker()` bindings.
+ * `bindings.text()`, `bindings.json()`, `bindings.worker()` and
+ * `bindings.durableObject()` bindings. A Worker bound only through a Durable
+ * Object binding, because it defines the class, is run too. A class uses
+ * SQLite storage unless the configuration of the Worker that defines it
+ * declares it with `legacy-kv`; for a Worker given only by name, which this
+ * can't read, SQLite is assumed.
  *
  * @throws {TypeError} If a Worker has a binding this can't set up, and no
  *   `overrides` entry for that Worker.
@@ -170,10 +176,13 @@ async function boundWorkers(
   );
   const found = new Map<string, WorkerLike>();
   const visit = async (worker: WorkerLike) => {
-    for (const binding of Object.values(envOf(worker))) {
-      if (!isWorkerBinding(binding) || typeof binding.worker === "string")
+    for (const binding of Object.values(envOf(worker)).map(parseBinding)) {
+      // Only a Worker given by its configuration can be run.
+      if (binding.kind !== "service" && binding.kind !== "durable-object")
         continue;
-      const bound = await resolve(binding.worker as CloudflareConfigInput, ctx);
+      if (binding.worker === undefined || typeof binding.worker === "string")
+        continue;
+      const bound = await resolve(binding.worker, ctx);
       const name = nameOf(bound);
       if (name === main.name || found.has(name)) continue;
       found.set(name, bound);
@@ -213,14 +222,86 @@ function envOf(worker: WorkerLike): Record<string, unknown> {
     : {};
 }
 
-function isWorkerBinding(
-  binding: unknown,
-): binding is { type: "worker"; worker: unknown } {
-  return (
-    typeof binding === "object" &&
-    binding !== null &&
-    (binding as { type?: unknown }).type === "worker"
-  );
+// A binding in a Worker's `env`, in the forms this can set up. A service or
+// Durable Object binding's `worker` is the Worker that serves it, by its
+// configuration or its name; a Durable Object binding without one is to a
+// class of the binding Worker itself.
+type Binding =
+  | { kind: "value"; value: unknown }
+  | { kind: "service"; worker: CloudflareConfigInput | string }
+  | {
+      kind: "durable-object";
+      worker: CloudflareConfigInput | string | undefined;
+      className: string;
+    }
+  | { kind: "unsupported"; type: unknown };
+
+function parseBinding(binding: unknown): Binding {
+  const { type, value, worker, exportName } = (
+    typeof binding === "object" && binding !== null ? binding : {}
+  ) as {
+    type?: unknown;
+    value?: unknown;
+    worker?: unknown;
+    exportName?: unknown;
+  };
+  const target = worker as CloudflareConfigInput | string | undefined;
+  switch (type) {
+    case "text":
+    case "json":
+      return { kind: "value", value };
+    case "worker":
+      if (target !== undefined) return { kind: "service", worker: target };
+      break;
+    case "durable-object":
+      if (typeof exportName === "string") {
+        return {
+          kind: "durable-object",
+          worker: target,
+          className: exportName,
+        };
+      }
+      break;
+  }
+  return { kind: "unsupported", type };
+}
+
+// The name of the Worker a binding's `worker` gives.
+function workerName(target: CloudflareConfigInput | string): string {
+  return typeof target === "string" ? target : nameOf(target as WorkerLike);
+}
+
+// Miniflare's options for a Durable Object binding of `worker`. The class is
+// in the Worker the binding names, or `worker` itself, and uses SQLite
+// storage unless that Worker's configuration declares it with `legacy-kv`.
+// A Worker given by name isn't known here, so it is assumed to use SQLite.
+function durableObjectOptions(
+  worker: WorkerLike,
+  binding: Extract<Binding, { kind: "durable-object" }>,
+): Record<string, unknown> {
+  const { className } = binding;
+  const scriptName = workerName(binding.worker ?? worker);
+  const declaring =
+    scriptName === nameOf(worker)
+      ? worker
+      : (binding.worker as WorkerLike | string);
+  return {
+    className,
+    ...(declaring === worker ? {} : { scriptName }),
+    useSQLite:
+      typeof declaring === "string" ||
+      storageOf(declaring, className) !== "legacy-kv",
+  };
+}
+
+// The storage a Worker's configuration declares for a class, if it does.
+function storageOf(worker: WorkerLike, className: string): unknown {
+  const exports = worker.exports;
+  if (typeof exports !== "object" || exports === null) return undefined;
+  const entry = (exports as Record<string, unknown>)[className];
+  return typeof entry === "object" && entry !== null
+    ? (entry as { storage?: unknown }).storage
+    : undefined;
 }
 
 // Miniflare options for the parts of a Worker's configuration this knows.
@@ -238,17 +319,23 @@ function workerOptions(
 
   const bindings: Record<string, unknown> = {};
   const serviceBindings: Record<string, string> = {};
+  const durableObjects: Record<string, unknown> = {};
   const unsupported: string[] = [];
-  for (const [key, binding] of Object.entries(envOf(worker))) {
-    const { type, value } = binding as { type?: unknown; value?: unknown };
-    if (type === "text" || type === "json") {
-      bindings[key] = value;
-    } else if (isWorkerBinding(binding)) {
-      const target = binding.worker;
-      serviceBindings[key] =
-        typeof target === "string" ? target : nameOf(target as WorkerLike);
-    } else {
-      unsupported.push(`${key} (${String(type)})`);
+  for (const [key, raw] of Object.entries(envOf(worker))) {
+    const binding = parseBinding(raw);
+    switch (binding.kind) {
+      case "value":
+        bindings[key] = binding.value;
+        break;
+      case "service":
+        serviceBindings[key] = workerName(binding.worker);
+        break;
+      case "durable-object":
+        durableObjects[key] = durableObjectOptions(worker, binding);
+        break;
+      case "unsupported":
+        unsupported.push(`${key} (${String(binding.type)})`);
+        break;
     }
   }
   if (unsupported.length > 0 && !overridden) {
@@ -259,6 +346,9 @@ function workerOptions(
   if (Object.keys(bindings).length > 0) options.bindings = bindings;
   if (Object.keys(serviceBindings).length > 0) {
     options.serviceBindings = serviceBindings;
+  }
+  if (Object.keys(durableObjects).length > 0) {
+    options.durableObjects = durableObjects;
   }
   return options;
 }

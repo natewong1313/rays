@@ -1,6 +1,7 @@
 // Tests `raysTestWorkers`, which builds the rays Workers a Worker under test
 // binds and describes them as auxiliary Workers for `cloudflareTest()`.
 
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -117,6 +118,60 @@ describe("raysTestWorkers", () => {
       overrides: { names: { kvNamespaces: ["CACHE"] } },
     });
     expect(worker!.kvNamespaces).toEqual(["CACHE"]);
+  });
+
+  it("runs a Worker bound only through a Durable Object binding", async () => {
+    await fixture.write("src/app/names.gleam", names);
+    await fixture.write(
+      "src/app/room.gleam",
+      "import rays/durable_object\n\npub fn room() -> durable_object.DurableObject(Nil) {\n  durable_object.new(Nil)\n}\n",
+    );
+    const rooms: Record<string, unknown> = {
+      name: "rooms",
+      entrypoint: "virtual:rays/worker/app/names",
+      exports: {
+        Room: { type: "durable-object", storage: "sqlite" },
+        Old: { type: "durable-object", storage: "legacy-kv" },
+      },
+    };
+    rooms.env = {
+      // Its own class, and its own legacy one.
+      ROOMS: { type: "durable-object", worker: rooms, exportName: "Room" },
+      OLD: { type: "durable-object", worker: rooms, exportName: "Old" },
+      // A class in a Worker given by name.
+      LOBBY: { type: "durable-object", worker: "app", exportName: "Lobby" },
+      // Its own class, without naming the Worker.
+      SELF: { type: "durable-object", exportName: "Room" },
+    };
+    const [worker, ...rest] = await raysTestWorkers(
+      {
+        worker: {
+          name: "app",
+          entrypoint: "virtual:rays/worker",
+          env: {
+            ROOMS: {
+              type: "durable-object",
+              worker: rooms,
+              exportName: "Room",
+            },
+          },
+        },
+      },
+      { root: fixture.root },
+    );
+    expect(rest).toEqual([]);
+    expect(worker).toMatchObject({
+      name: "rooms",
+      durableObjects: {
+        ROOMS: { className: "Room", useSQLite: true },
+        OLD: { className: "Old", useSQLite: false },
+        LOBBY: { className: "Lobby", scriptName: "app", useSQLite: true },
+        SELF: { className: "Room", useSQLite: true },
+      },
+    });
+    const source = await readFile(worker!.scriptPath, "utf8");
+    expect(source).toMatch(/\$rays_class_Room = class extends DurableObject/);
+    expect(source).toMatch(/\$rays_class_Room as Room/);
   });
 
   it("returns nothing when no rays Worker is bound", async () => {

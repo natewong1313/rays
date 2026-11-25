@@ -1,10 +1,12 @@
 // The footers appended to compiled modules, which register their custom
-// types and RPC methods with rays/worker_rpc's FFI.
+// types, RPC methods and Durable Object classes with rays/worker_rpc's FFI.
 
 import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { DurableObjectClass } from "../durable-object.ts";
+import { BuildError } from "../error.ts";
 import { relativeSpecifier, writeAtomically } from "../files.ts";
-import { RpcBuildError, type RpcContext, type RpcMethod } from "./types.ts";
+import type { RpcContext, RpcMethod } from "./types.ts";
 
 /** The first line of a footer, which marks where it starts. */
 export const FOOTER_MARKER = "// rays:rpc";
@@ -15,30 +17,45 @@ const DEFINES_CUSTOM_TYPES = "CustomType as $CustomType";
 const CLASS = /^(?:export )?class (\w+) extends /gm;
 const FOOTERS_WRITTEN = ".rays-rpc-footers";
 
+/** What the footers register, besides every module's custom types. */
+export interface Registered {
+  methods: readonly RpcMethod[];
+  classes: readonly DurableObjectClass[];
+}
+
 export async function writeFooters(
   context: RpcContext,
-  methods: RpcMethod[],
+  { methods, classes }: Registered,
   ffi: string,
 ): Promise<void> {
-  const byModule = new Map<string, RpcMethod[]>();
-  for (const method of methods) {
-    byModule.set(method.module, [
-      ...(byModule.get(method.module) ?? []),
-      method,
-    ]);
-  }
+  const byModule = new Map<
+    string,
+    { methods: RpcMethod[]; classes: DurableObjectClass[] }
+  >();
+  const of = (module: string) => {
+    let found = byModule.get(module);
+    if (found === undefined) {
+      found = { methods: [], classes: [] };
+      byModule.set(module, found);
+    }
+    return found;
+  };
+  for (const method of methods) of(method.module).methods.push(method);
+  for (const object of classes) of(object.module).classes.push(object);
 
-  // Footers are only written while the project has methods. This file says
-  // an earlier build wrote some, so a build without methods only reads every
-  // compiled module when there are footers to remove. It is written before
-  // the footers, so a build that stops halfway leaves it behind too.
+  // Footers are only written while the project has methods or classes. This
+  // file says an earlier build wrote some, so a build without them only
+  // reads every compiled module when there are footers to remove. It is
+  // written before the footers, so a build that stops halfway leaves it
+  // behind too.
+  const wanted = methods.length > 0 || classes.length > 0;
   const marker = path.join(context.javascript, FOOTERS_WRITTEN);
   const written = await readFile(marker).then(
     () => true,
     () => false,
   );
-  if (methods.length === 0 && !written) return;
-  if (methods.length > 0 && !written) {
+  if (!wanted && !written) return;
+  if (wanted && !written) {
     await writeFile(marker, "rays/worker_rpc footers are in this build.\n");
   }
 
@@ -49,6 +66,7 @@ export async function writeFooters(
     return;
   }
 
+  const none: Registered = { methods: [], classes: [] };
   for (const packageName of packages) {
     const directory = path.join(context.javascript, packageName);
     for (const file of await compiledFiles(directory)) {
@@ -60,50 +78,58 @@ export async function writeFooters(
         .join("/");
       const source = await readFile(file, "utf8");
       const body = stripFooter(source);
-      const footer =
-        methods.length === 0
-          ? ""
-          : footerFor(
-              body,
-              module,
-              packageName === context.packageName
-                ? (byModule.get(module) ?? [])
-                : [],
-              relativeSpecifier(path.dirname(file), ffi),
-            );
+      const footer = wanted
+        ? footerFor(
+            body,
+            module,
+            packageName === context.packageName
+              ? (byModule.get(module) ?? none)
+              : none,
+            relativeSpecifier(path.dirname(file), ffi),
+          )
+        : "";
       const updated = footer === "" ? body : `${body}${footer}`;
       if (updated !== source) await writeAtomically(file, updated);
     }
   }
-  if (methods.length === 0) await rm(marker, { force: true });
+  if (!wanted) await rm(marker, { force: true });
 }
 
 function footerFor(
   body: string,
   module: string,
-  methods: RpcMethod[],
+  { methods, classes }: Registered,
   ffi: string,
 ): string {
-  const classes = body.includes(DEFINES_CUSTOM_TYPES)
+  const types = body.includes(DEFINES_CUSTOM_TYPES)
     ? [...body.matchAll(CLASS)].map((match) => match[1]!)
     : [];
-  if (classes.length === 0 && methods.length === 0) return "";
+  if (types.length === 0 && methods.length === 0 && classes.length === 0) {
+    return "";
+  }
 
   const lines = [
     FOOTER_MARKER,
-    "// Added by rays to register this module's custom types and RPC methods",
-    "// for rays/worker_rpc. It is rewritten on every build.",
-    `import { register as $rays_register, registerMethod as $rays_register_method } from ${JSON.stringify(ffi)};`,
+    "// Added by rays to register this module's custom types, RPC methods and",
+    "// Durable Object classes for rays/worker_rpc. It is rewritten on every",
+    "// build.",
+    `import { register as $rays_register, registerMethod as $rays_register_method, registerClass as $rays_register_class } from ${JSON.stringify(ffi)};`,
   ];
-  if (classes.length > 0) {
+  if (types.length > 0) {
     lines.push(
-      `$rays_register(${JSON.stringify(module)}, { ${classes.join(", ")} });`,
+      `$rays_register(${JSON.stringify(module)}, { ${types.join(", ")} });`,
     );
   }
   for (const method of methods) {
     const identifier = exportedName(body, method.name);
     lines.push(
       `$rays_register_method(${JSON.stringify(module)}, ${JSON.stringify(method.name)}, ${identifier}, ${JSON.stringify(method.version)});`,
+    );
+  }
+  for (const object of classes) {
+    const identifier = exportedName(body, object.function);
+    lines.push(
+      `$rays_register_class(${JSON.stringify(object.className)}, ${identifier});`,
     );
   }
   return `\n${lines.join("\n")}\n`;
@@ -125,7 +151,7 @@ function exportedName(body: string, name: string): string {
     if (new RegExp(`^export function ${escaped}\\(`, "m").test(body))
       return candidate;
   }
-  throw new RpcBuildError(`Could not find the compiled function ${name}.`);
+  throw new BuildError(`Could not find the compiled function ${name}.`);
 }
 
 /** The module source without the footer an earlier build appended. */
