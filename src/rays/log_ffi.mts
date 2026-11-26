@@ -1,9 +1,23 @@
 // FFI shim for `rays/log`: writing logs with the `console` methods, which the
-// Workers runtime sends to Workers Logs and `wrangler tail`.
+// Workers runtime sends to Workers Logs and `wrangler tail`, and holding the
+// minimum level.
 //
-// The level is chosen in Gleam; these functions only call the method.
+// Levels and their ranks are decided in Gleam; these functions only call the
+// method and store the number.
 
 type Method = "debug" | "info" | "warn" | "error";
+
+// The rank of the least severe level written, shared by the whole isolate.
+// 0 is `Debug`, so everything is written until `set_level` is called.
+let minimum = 0;
+
+export function setMinimumRank(rank: number): undefined {
+  minimum = rank;
+}
+
+export function minimumRank(): number {
+  return minimum;
+}
 
 export function writeText(method: Method, message: string): undefined {
   console[method](message);
