@@ -216,6 +216,10 @@ class ${declared} extends $rays_DurableObject {
     super(ctx, env);
     this.#memory = $rays_wake(${definition}, ctx, env);
   }
+
+  alarm() {
+    return $rays_alarm(this.ctx);
+  }
 ${served}}
 
 export { ${declared} as ${object.className} };
@@ -225,10 +229,12 @@ export { ${declared} as ${object.className} };
   return `
 // The project's Durable Object classes, each with a method for each Durable
 // Object method in the project. Methods a class doesn't bind reply that they
-// aren't bound.
+// aren't bound. Each class's alarm method runs the alarms it registered with
+// durable_object.register_alarm that are due.
 ${ignore}import { DurableObject as $rays_DurableObject } from "cloudflare:workers";
 ${ignore}import {
   checkObject as $rays_check,
+  runAlarms as $rays_alarm,
   serveObject as $rays_serve,
   wakeObject as $rays_wake,
 } from ${JSON.stringify(specifier(objects.ffi))};

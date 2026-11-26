@@ -14,5 +14,10 @@
     // the tests.
     "types": ["@cloudflare/vitest-plugin/types"]
   },
-  "include": ["cloudflare.config.ts", ".cloudflare/types", "test/**/*.ts"]
+  "include": [
+    "cloudflare.config.ts",
+    ".cloudflare/types",
+    "src/**/*.mts",
+    "test/**/*.ts"
+  ]
 }

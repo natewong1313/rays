@@ -128,6 +128,58 @@
 //// }
 //// ```
 ////
+//// ## Alarms
+////
+//// Cloudflare gives each instance one alarm. rays builds many on it: a class
+//// registers handlers with `register_alarm`, and its methods schedule an
+//// alarm for a handler and a key with `schedule_alarm`. Each handler can
+//// have many alarms pending, one per key, and each alarm is retried on its
+//// own when it fails:
+////
+//// ```gleam
+//// pub fn reminders() -> DurableObject(Nil) {
+////   durable_object.new(Nil)
+////   |> durable_object.bind(remind_me)
+////   |> durable_object.register_alarm(
+////     remind,
+////     id: "remind",
+////     retry: retry.Fixed(every: duration.minutes(1)),
+////     max_attempts: 3,
+////     timeout: duration.seconds(30),
+////   )
+//// }
+////
+//// pub fn remind_me(
+////   params: Params(#(String, Timestamp), Nil),
+//// ) -> Promise(Result(Nil, durable_object.AlarmError)) {
+////   let #(user_id, at) = params.args
+////   durable_object.schedule_alarm(params.context, remind, key: user_id, at:)
+////   |> promise.resolve
+//// }
+////
+//// pub fn remind(alarm: Alarm(Nil)) -> Promise(durable_object.Outcome) {
+////   use sent <- promise.map(send_reminder(alarm.env, alarm.key))
+////   case sent {
+////     Ok(Nil) -> durable_object.Done
+////     Error(reason) -> durable_object.Retry(reason:)
+////   }
+//// }
+//// ```
+////
+//// Alarms run at least once: an instance can be evicted partway through a
+//// handler, which then runs again. Every attempt of one occurrence of an
+//// alarm has the same `idempotency_key`, to send to services that
+//// deduplicate requests. Writes a handler makes to the instance's database
+//// after its last wait on anything outside the instance, such as a fetch or
+//// a timer, are stored together with its outcome: both are kept, or
+//// neither is. An attempt that times out is the exception: its outcome is
+//// stored when it times out, and the writes it makes after that are stored
+//// on their own, so the attempt that retries it may see them.
+////
+//// Alarms are stored in the instance's SQLite database, so a class with
+//// alarms must use SQLite storage. Times come from the `gleam_time`
+//// package, which the project adds with `gleam add gleam_time`.
+////
 //// ## How it works
 ////
 //// Every public function in the package that takes no arguments and
@@ -159,8 +211,12 @@
 //// an entry for every method, and serves the ones bound to it.
 
 import gleam/dynamic.{type Dynamic}
+import gleam/int
 import gleam/javascript/promise.{type Promise}
 import gleam/result
+import gleam/time/duration.{type Duration}
+import gleam/time/timestamp.{type Timestamp}
+import rays/retry
 import rays/worker.{type Env}
 import rays/worker_rpc
 
@@ -377,6 +433,267 @@ pub fn wait_until(context: Context, promise: Promise(a)) -> Nil
 ///
 @external(javascript, "./durable_object_ffi.mts", "lock")
 pub fn lock(context: Context, locked: fn() -> Promise(a)) -> Promise(a)
+
+//
+// Alarms
+//
+
+/// What an alarm handler receives each time one of its alarms runs: which
+/// alarm it is, the Worker's bindings, the instance's context, and a handle
+/// on its memory.
+///
+pub type Alarm(memory) {
+  Alarm(
+    /// The key the alarm was scheduled with.
+    key: String,
+    /// The time the alarm was scheduled for. A retry has the same one.
+    scheduled_at: Timestamp,
+    /// Which attempt this is, starting at 1. An attempt lost with its
+    /// instance counts, so this can skip numbers, and it isn't a record of
+    /// what earlier attempts did: guard work that must happen once with
+    /// `idempotency_key` instead.
+    attempt: Int,
+    /// The same on every attempt of this occurrence of the alarm, and
+    /// different for every other occurrence, including the next one of an
+    /// alarm that schedules itself again. Send it to services that
+    /// deduplicate requests, such as with an `Idempotency-Key` header.
+    idempotency_key: String,
+    env: Env,
+    context: Context,
+    memory: Memory(memory),
+  )
+}
+
+/// What an alarm handler says should happen next.
+///
+pub type Outcome {
+  /// The alarm is finished, and is deleted.
+  Done
+  /// Try the alarm again, after the wait its handler's `retry` gives, unless
+  /// that was its last attempt. A handler that panics, rejects, or times out
+  /// is retried in the same way.
+  Retry(reason: String)
+  /// Stop: the alarm failed, and won't be tried again unless it is
+  /// scheduled again.
+  GiveUp(reason: String)
+}
+
+/// Run a handler when the alarms scheduled for it with `schedule_alarm`
+/// are due. A class can register many handlers, and each can have many
+/// alarms pending, told apart by their keys.
+///
+/// - `id` names the handler's alarms in the instance's storage, so it must
+///   stay the same across deploys: the handler's function can be renamed or
+///   moved, but alarms already scheduled under an id that a later version
+///   no longer registers wait, without running, until a version that does
+///   runs them. Each handler of a class needs an id of its own.
+/// - `retry` is how long to wait after an attempt fails.
+/// - `max_attempts` is how many attempts an alarm gets, including the
+///   first. After the last one fails, the alarm is kept as failed until it
+///   is scheduled again or cancelled.
+/// - `timeout` is how long an attempt can take, from 1 millisecond up to
+///   14 minutes. An attempt that takes longer is retried, though rays can't
+///   stop its handler: the next attempt of the same alarm waits until it
+///   settles. Writes the handler makes after it timed out are stored on
+///   their own, not with an outcome, so the retry may see them.
+///
+/// If `id` is empty or another handler's, `retry` isn't valid, or
+/// `max_attempts` or `timeout` is out of range, the Worker fails to start.
+/// Registering the same handler again replaces it.
+///
+/// Alarms are stored in the instance's SQLite database, in a table named
+/// `rays_alarms`, so a class with alarms must use SQLite storage.
+///
+/// # Examples
+///
+/// ```gleam
+/// durable_object.new(Subscription(plan: "free"))
+/// |> durable_object.register_alarm(
+///   renew,
+///   id: "renew",
+///   retry: retry.Exponential(
+///     first: duration.seconds(2),
+///     max: duration.minutes(10),
+///   ),
+///   max_attempts: 8,
+///   timeout: duration.minutes(2),
+/// )
+/// ```
+///
+pub fn register_alarm(
+  object: DurableObject(memory),
+  handler: fn(Alarm(memory)) -> Promise(Outcome),
+  id id: String,
+  retry backoff: retry.Backoff,
+  max_attempts max_attempts: Int,
+  timeout timeout: Duration,
+) -> DurableObject(memory) {
+  let problem = case alarm_problem(id, backoff, max_attempts, timeout) {
+    Ok(Nil) -> ""
+    Error(problem) -> problem
+  }
+  js_register_alarm(
+    object,
+    handler,
+    id,
+    fn(key, scheduled_at, attempt, idempotency_key, env, context, memory) {
+      Alarm(
+        key:,
+        scheduled_at: timestamp_from_milliseconds(scheduled_at),
+        attempt:,
+        idempotency_key:,
+        env:,
+        context:,
+        memory:,
+      )
+      |> handler
+      |> promise.map(outcome_to_pair)
+    },
+    fn(attempt) {
+      retry.delay(backoff, after: attempt) |> duration.to_milliseconds
+    },
+    max_attempts,
+    duration.to_milliseconds(timeout),
+    problem,
+  )
+}
+
+// Why `register_alarm`'s arguments can't be used.
+fn alarm_problem(
+  id: String,
+  backoff: retry.Backoff,
+  max_attempts: Int,
+  timeout: Duration,
+) -> Result(Nil, String) {
+  let timeout = duration.to_milliseconds(timeout)
+  use Nil <- result.try(case id {
+    "" -> Error("its id is empty")
+    _ -> Ok(Nil)
+  })
+  use Nil <- result.try(retry.validate(backoff))
+  case max_attempts < 1, timeout < 1 || timeout > 14 * 60 * 1000 {
+    True, _ ->
+      Error(
+        "max_attempts must be at least 1, not " <> int.to_string(max_attempts),
+      )
+    False, True ->
+      Error(
+        "timeout must be from 1 millisecond to 14 minutes, not "
+        <> int.to_string(timeout)
+        <> " milliseconds",
+      )
+    False, False -> Ok(Nil)
+  }
+}
+
+fn outcome_to_pair(outcome: Outcome) -> #(String, String) {
+  case outcome {
+    Done -> #("done", "")
+    Retry(reason:) -> #("retry", reason)
+    GiveUp(reason:) -> #("give_up", reason)
+  }
+}
+
+/// An error from scheduling or cancelling an alarm.
+///
+pub type AlarmError {
+  /// The instance's class doesn't `register_alarm` this handler.
+  AlarmNotRegistered(handler: String)
+  /// The instance's storage failed, as it does for a class whose storage
+  /// isn't SQLite.
+  AlarmStorageFailed(message: String)
+}
+
+/// Schedule the handler's alarm with the given key to run at the given
+/// time. A time that has passed runs it as soon as possible.
+///
+/// An alarm with the same handler and key that is pending or failed is
+/// replaced: the new one starts its attempts again, and gets a new
+/// `idempotency_key`. If it is already pending for that same time, it is
+/// left as it is, so scheduling it again, as a retried call might, doesn't
+/// change its key. An attempt that is running carries on, but its outcome
+/// can no longer change the replacement.
+///
+/// Use the same key, such as `""`, for a handler that has one alarm at a
+/// time, and a different one, such as a user's id, for each of many.
+///
+/// The alarm is stored with the instance's other writes, before it replies,
+/// so it needn't be awaited.
+///
+/// # Examples
+///
+/// ```gleam
+/// pub fn remind_me(
+///   params: Params(#(String, Timestamp), Nil),
+/// ) -> Promise(Result(Nil, durable_object.AlarmError)) {
+///   let #(user_id, at) = params.args
+///   durable_object.schedule_alarm(params.context, remind, key: user_id, at:)
+///   |> promise.resolve
+/// }
+/// ```
+///
+pub fn schedule_alarm(
+  context: Context,
+  handler: fn(Alarm(memory)) -> Promise(Outcome),
+  key key: String,
+  at at: Timestamp,
+) -> Result(Nil, AlarmError) {
+  js_schedule_alarm(context, handler, key, timestamp_to_milliseconds(at))
+  |> result.map_error(alarm_failure_to_error)
+}
+
+/// Delete the handler's alarm with the given key, pending or failed.
+/// Returns whether there was one.
+///
+/// An attempt that is running carries on, but it can no longer retry.
+///
+pub fn cancel_alarm(
+  context: Context,
+  handler: fn(Alarm(memory)) -> Promise(Outcome),
+  key key: String,
+) -> Result(Bool, AlarmError) {
+  js_cancel_alarm(context, handler, key)
+  |> result.map_error(alarm_failure_to_error)
+}
+
+/// When the handler's alarm with the given key will next be tried, if it
+/// is pending: the time it was scheduled for, or the time of its next retry.
+/// While an attempt is running, it is when the alarm would be tried again
+/// if that attempt were lost.
+///
+/// Returns an error if the alarm isn't pending: if it was never scheduled,
+/// has finished, failed, or was cancelled.
+///
+pub fn next_alarm(
+  context: Context,
+  handler: fn(Alarm(memory)) -> Promise(Outcome),
+  key key: String,
+) -> Result(Timestamp, Nil) {
+  js_next_alarm(context, handler, key)
+  |> result.map(timestamp_from_milliseconds)
+}
+
+fn alarm_failure_to_error(failure: #(String, String)) -> AlarmError {
+  case failure {
+    #("not_registered", handler) -> AlarmNotRegistered(handler:)
+    #(_, message) -> AlarmStorageFailed(message:)
+  }
+}
+
+fn timestamp_to_milliseconds(timestamp: Timestamp) -> Int {
+  let #(seconds, nanoseconds) =
+    timestamp.to_unix_seconds_and_nanoseconds(timestamp)
+  seconds * 1000 + nanoseconds / 1_000_000
+}
+
+// Seconds and the rest, rather than nanoseconds alone, which would be more
+// than JavaScript can hold exactly.
+fn timestamp_from_milliseconds(milliseconds: Int) -> Timestamp {
+  timestamp.from_unix_seconds_and_nanoseconds(
+    milliseconds / 1000,
+    milliseconds % 1000 * 1_000_000,
+  )
+}
 
 //
 // Ids
@@ -642,6 +959,41 @@ fn js_bind(
   method: fn(Params(args, memory)) -> Promise(reply),
   handler: fn(args, Env, Context, Memory(memory)) -> Promise(reply),
 ) -> DurableObject(memory)
+
+@external(javascript, "./durable_object/alarm_ffi.mts", "registerAlarm")
+fn js_register_alarm(
+  object: DurableObject(memory),
+  handler: fn(Alarm(memory)) -> Promise(Outcome),
+  id: String,
+  run: fn(String, Int, Int, String, Env, Context, Memory(memory)) ->
+    Promise(#(String, String)),
+  delay: fn(Int) -> Int,
+  max_attempts: Int,
+  timeout: Int,
+  problem: String,
+) -> DurableObject(memory)
+
+@external(javascript, "./durable_object/alarm_ffi.mts", "schedule")
+fn js_schedule_alarm(
+  context: Context,
+  handler: fn(Alarm(memory)) -> Promise(Outcome),
+  key: String,
+  at: Int,
+) -> Result(Nil, #(String, String))
+
+@external(javascript, "./durable_object/alarm_ffi.mts", "cancel")
+fn js_cancel_alarm(
+  context: Context,
+  handler: fn(Alarm(memory)) -> Promise(Outcome),
+  key: String,
+) -> Result(Bool, #(String, String))
+
+@external(javascript, "./durable_object/alarm_ffi.mts", "next")
+fn js_next_alarm(
+  context: Context,
+  handler: fn(Alarm(memory)) -> Promise(Outcome),
+  key: String,
+) -> Result(Int, Nil)
 
 @external(javascript, "./durable_object_ffi.mts", "namespace")
 fn js_namespace(binding: Dynamic) -> Result(Namespace(memory), Nil)

@@ -429,3 +429,111 @@ describe("entry modules", () => {
     );
   });
 });
+
+describe("alarm handlers", () => {
+  // A class that registers alarm handlers as given, and a handler.
+  function reminders(registrations: string): string {
+    return `import gleam/javascript/promise.{type Promise}
+import gleam/time/duration
+import rays/durable_object.{type Alarm, type DurableObject}
+import rays/retry
+
+pub fn reminders() -> DurableObject(Nil) {
+  durable_object.new(Nil)
+  ${registrations}
+}
+
+pub fn remind(_alarm: Alarm(Nil)) -> Promise(durable_object.Outcome) {
+  promise.resolve(durable_object.Done)
+}
+`;
+  }
+
+  const register = (handler: string, id: string, rest = valid) =>
+    `|> durable_object.register_alarm(${handler}, id: ${JSON.stringify(id)}, ${rest})`;
+  const valid =
+    "retry: retry.Fixed(every: duration.seconds(1)), max_attempts: 3, timeout: duration.seconds(30)";
+
+  async function buildReminders(registrations: string) {
+    await fixture.write("src/app/reminders.gleam", reminders(registrations));
+    await fixture.write(
+      "src/app.gleam",
+      app.replaceAll("counter", "reminders"),
+    );
+    const [entry] = await build({ root: fixture.root });
+    return entry!.path;
+  }
+
+  it("are run by an alarm method on every class", async () => {
+    const source = await readFile(
+      await buildReminders(register("remind", "remind")),
+      "utf8",
+    );
+    expect(source).toContain("alarm() {\n    return $rays_alarm(this.ctx);");
+  });
+
+  it("can be any function, as they are stored under their ids", async () => {
+    const anonymous = "fn(_) { promise.resolve(durable_object.Done) }";
+    const module = await load(
+      await buildReminders(
+        `${register("remind", "remind")}\n  ${register(anonymous, "other")}`,
+      ),
+    );
+    expect(module.Reminders).toBeTypeOf("function");
+  });
+
+  it.each([
+    [
+      "an empty id",
+      register("remind", ""),
+      'The alarm handler "" of the class Reminders can\'t be registered: its id is empty.',
+    ],
+    [
+      "max_attempts below 1",
+      register(
+        "remind",
+        "remind",
+        valid.replace("max_attempts: 3", "max_attempts: 0"),
+      ),
+      "max_attempts must be at least 1, not 0",
+    ],
+    [
+      "a timeout of nothing",
+      register(
+        "remind",
+        "remind",
+        valid.replace("duration.seconds(30)", "duration.seconds(0)"),
+      ),
+      "timeout must be from 1 millisecond to 14 minutes, not 0 milliseconds",
+    ],
+    [
+      "a timeout longer than an alarm can run",
+      register(
+        "remind",
+        "remind",
+        valid.replace("duration.seconds(30)", "duration.minutes(15)"),
+      ),
+      "timeout must be from 1 millisecond to 14 minutes, not 900000 milliseconds",
+    ],
+    [
+      "a backoff that can't be used",
+      register(
+        "remind",
+        "remind",
+        valid.replace("duration.seconds(1)", "duration.seconds(-1)"),
+      ),
+      "a Fixed backoff can't wait a negative time",
+    ],
+    [
+      "an id another handler has",
+      `${register("remind", "remind")}\n  ${register("fn(_) { promise.resolve(durable_object.Done) }", "remind")}`,
+      'The alarm handler "remind" of the class Reminders is registered twice, for different functions.',
+    ],
+  ])(
+    "stop the Worker starting when registered with %s",
+    async (_, registrations, problem) => {
+      const entry = await buildReminders(registrations);
+      await expect(load(entry)).rejects.toThrow(problem);
+    },
+  );
+});

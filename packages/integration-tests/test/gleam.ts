@@ -34,3 +34,4 @@ export function exported(
 }
 export * as notes from "../build/dev/javascript/integration_tests/integration_tests/notes.mjs";
 export * as sqlCheck from "../build/dev/javascript/integration_tests/integration_tests/sql_check.mjs";
+export * as reminders from "../build/dev/javascript/integration_tests/integration_tests/reminders.mjs";

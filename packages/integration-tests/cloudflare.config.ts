@@ -9,6 +9,7 @@ export default defineConfig({
     exports: {
       Counter: exports.durableObject({ storage: "sqlite" }),
       Notes: exports.durableObject({ storage: "sqlite" }),
+      Reminders: exports.durableObject({ storage: "sqlite" }),
       Restless: exports.durableObject({ storage: "sqlite" }),
       Sleepy: exports.durableObject({ storage: "sqlite" }),
     },

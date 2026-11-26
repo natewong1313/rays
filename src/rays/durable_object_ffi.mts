@@ -24,10 +24,18 @@ import {
   type Service,
 } from "./worker_rpc_ffi.mts";
 import type { Env } from "./worker_ffi.mts";
+import {
+  checkAlarms,
+  rememberInstance,
+  type AlarmConfig,
+  type AlarmFunction,
+} from "./durable_object/alarm_ffi.mts";
 
 // Entry modules with Durable Objects hand the runtime's tracing API to
-// `rays/trace` through this module, which they import anyway.
+// `rays/trace` through this module, which they import anyway, and each
+// class's `alarm` method runs its alarms with `runAlarms`.
 export { useTracing } from "./trace_ffi.mts";
+export { runAlarms } from "./durable_object/alarm_ffi.mts";
 
 // Classes
 
@@ -42,18 +50,25 @@ const DEFINITION = Symbol.for("rays.durable_object");
 
 type Wake = (env: Env, ctx: DurableObjectState, memory: Memory) => undefined;
 
-// What `new`, `on_wake` and `bind` build: a class's starting memory, wake
-// function and methods. The generated entry module makes a `DurableObject`
-// class from it.
+// What `new`, `on_wake`, `bind` and `register_alarm` build: a class's
+// starting memory, wake function, methods and alarm handlers. The generated
+// entry module makes a `DurableObject` class from it.
 export interface Definition {
   readonly [DEFINITION]: true;
   readonly memory: unknown;
   readonly wake: Wake | undefined;
   readonly methods: ReadonlyMap<MethodFunction, Handler>;
+  readonly alarms: ReadonlyMap<AlarmFunction, AlarmConfig>;
 }
 
 export function newObject(memory: unknown): Definition {
-  return { [DEFINITION]: true, memory, wake: undefined, methods: new Map() };
+  return {
+    [DEFINITION]: true,
+    memory,
+    wake: undefined,
+    methods: new Map(),
+    alarms: new Map(),
+  };
 }
 
 export function onWake(definition: Definition, wake: Wake): Definition {
@@ -128,6 +143,7 @@ export function checkObject(className: string, source: string): Definition {
     checked.methods.keys(),
     `durable_object.bind was given a function that isn't an RPC method, for the class ${className}. A method must be a public function in this package whose only argument is a durable_object.Params.`,
   );
+  checkAlarms(checked, className);
   return checked;
 }
 
@@ -141,6 +157,8 @@ export function wakeObject(
   env: Env,
 ): Memory {
   const memory = new Memory(definition.memory);
+  // Before on_wake, which can schedule alarms.
+  rememberInstance(definition, ctx, env, memory);
   definition.wake?.(env, ctx, memory);
   return memory;
 }
