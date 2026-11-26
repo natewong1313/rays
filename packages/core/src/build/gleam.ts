@@ -121,12 +121,25 @@ export async function readInterface(
  * synchronously. What Gleam prints is kept in the error, not printed.
  */
 export function readInterfaceSync(gleam: string, root: string): Interface {
-  let json: string;
+  return parseInterface(runGleamSync(gleam, root, EXPORT_INTERFACE));
+}
+
+/**
+ * Run Gleam synchronously, with `input` on its stdin, and return its stdout.
+ * What it prints to stderr is kept in the error, not printed.
+ */
+export function runGleamSync(
+  gleam: string,
+  root: string,
+  args: readonly string[],
+  input?: string,
+): string {
   try {
-    json = execFileSync(gleam, EXPORT_INTERFACE, {
+    return execFileSync(gleam, args, {
       cwd: root,
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
+      input,
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       maxBuffer: 256 * 1024 * 1024,
     });
   } catch (error) {
@@ -136,10 +149,9 @@ export function readInterfaceSync(gleam: string, root: string): Interface {
       signal?: NodeJS.Signals | null;
     };
     throw failed(
-      EXPORT_INTERFACE,
+      args,
       signal ?? null,
       typeof stderr === "string" ? stderr : "",
     );
   }
-  return parseInterface(json);
 }

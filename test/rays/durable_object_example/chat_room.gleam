@@ -1,6 +1,5 @@
 //// The `rays/durable_object` module docs' example class, compiled here so
-//// it keeps compiling. examples/durable_object runs the same class in the
-//// Workers runtime.
+//// it keeps compiling.
 
 import gleam/javascript/promise.{type Promise}
 import gleam/list

@@ -16,6 +16,7 @@ import path from "node:path";
 import { findDurableObjectClasses } from "./build/durable-object.ts";
 import { entrySource } from "./build/entry.ts";
 import { relativeSpecifier, writeIfChanged } from "./build/files.ts";
+import { writeMigrationModules } from "./build/migrations.ts";
 import {
   gleamBinary,
   noGleamToml,
@@ -106,12 +107,17 @@ export interface Project {
  * Compile the Gleam project to JavaScript, and read the types of its modules
  * so that its Worker modules can be checked.
  *
+ * First it writes the Gleam module beside each `migrations` directory under
+ * `src/` that holds `.sql` files, such as `src/app/notes/migrations.gleam`,
+ * for `rays/durable_object/sql`.
+ *
  * @throws {BuildError} If the project is not usable or fails to compile.
  */
 export async function compile(options: CompileOptions): Promise<Project> {
   const root = path.resolve(options.root);
   const packageName = await readPackageName(root);
   const gleam = gleamBinary(options.gleam);
+  writeMigrationModules(root, gleam);
   await runGleam(gleam, root, ["build", "--target", "javascript"], {
     output: options.output ?? "inherit",
   });
@@ -195,7 +201,8 @@ export async function build(options: BuildOptions): Promise<Entry[]> {
  *
  * It is synchronous, for configuration that is evaluated synchronously, such
  * as `raysWorker()`'s. Gleam compiles the project to read its types, so it
- * takes as long as a build.
+ * takes as long as a build, and it writes the project's migrations modules
+ * first, as {@link compile} does.
  *
  * @throws {BuildError} If there is no `gleam.toml` in `root`, the project
  *   fails to compile, or a class can't be used, for example because two have
@@ -207,6 +214,8 @@ export function readDurableObjectClasses(options: {
 }): string[] {
   const root = path.resolve(options.root);
   if (!existsSync(path.join(root, "gleam.toml"))) throw noGleamToml(root);
-  const modules = readInterfaceSync(gleamBinary(options.gleam), root);
+  const gleam = gleamBinary(options.gleam);
+  writeMigrationModules(root, gleam);
+  const modules = readInterfaceSync(gleam, root);
   return findDurableObjectClasses(modules).map((object) => object.className);
 }

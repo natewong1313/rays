@@ -7,7 +7,8 @@
 //// value of any type, which starts as the value given to `new` each time
 //// the instance wakes. Cloudflare evicts an instance that has been idle for
 //// a while, and its memory goes with it, so the next call wakes it again.
-//// Anything that must outlive an eviction belongs in storage.
+//// Anything that must outlive an eviction belongs in the instance's SQLite
+//// database, which `rays/durable_object/sql` queries.
 ////
 //// The class's RPC methods read its memory with `read_memory` and change it
 //// with `update_memory`:
@@ -73,9 +74,10 @@
 //// }
 //// ```
 ////
-//// This code is compiled in rays's own test suite, and the
-//// `examples/durable_object` project runs the same class in the Workers
-//// runtime.
+//// This code is compiled in rays's own test suite. The
+//// `examples/durable_object` project runs a chat room in the Workers
+//// runtime that keeps its messages in its database instead, with
+//// `rays/durable_object/sql`.
 ////
 //// ## Memory and interleaving
 ////

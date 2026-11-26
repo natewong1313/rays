@@ -1,6 +1,7 @@
 // File helpers shared by the build steps.
 
 import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -19,9 +20,31 @@ export async function writeAtomically(
   file: string,
   contents: string,
 ): Promise<void> {
-  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  const temporary = temporaryName(file);
   await writeFile(temporary, contents);
   await rename(temporary, file);
+}
+
+/** {@link writeAtomically}, synchronously, making the file's directory. */
+export function writeAtomicallySync(file: string, contents: string): void {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = temporaryName(file);
+  writeFileSync(temporary, contents);
+  renameSync(temporary, file);
+}
+
+function temporaryName(file: string): string {
+  return `${file}.${process.pid}.${randomUUID()}.tmp`;
+}
+
+/** The file's contents, or `undefined` if it doesn't exist. */
+export function readIfExistsSync(file: string): string | undefined {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (error) {
+    if (isErrorCode(error, "ENOENT")) return undefined;
+    throw error;
+  }
 }
 
 /**

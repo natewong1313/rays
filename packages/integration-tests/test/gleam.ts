@@ -27,3 +27,5 @@ export function exported(
     durableObject.exported({ exports } as never, classFunction as never),
   );
 }
+export * as notes from "../build/dev/javascript/integration_tests/integration_tests/notes.mjs";
+export * as sqlCheck from "../build/dev/javascript/integration_tests/integration_tests/sql_check.mjs";

@@ -1,3 +1,4 @@
+import { evictDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
@@ -11,6 +12,15 @@ describe("a chat room", () => {
     expect(await text(post("/rooms/general", "hello"))).toBe("1");
     expect(await text(post("/rooms/general", "again"))).toBe("2");
     expect(await text(get("/rooms/general"))).toBe("again\nhello");
+  });
+
+  it("keeps its messages in its database when it is evicted", async () => {
+    await post("/rooms/kept", "before");
+    const room = (exports as unknown as Record<string, DurableObjectNamespace>)
+      .ChatRoom!.getByName("kept");
+    await evictDurableObject(room);
+    expect(await text(post("/rooms/kept", "after"))).toBe("2");
+    expect(await text(get("/rooms/kept"))).toBe("after\nbefore");
   });
 
   it("is one instance per name", async () => {
