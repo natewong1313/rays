@@ -33,7 +33,9 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
+    "@fast-check/vitest": "catalog:",
     "@types/node": "catalog:",
+    "fast-check": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

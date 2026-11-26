@@ -228,6 +228,17 @@ export function rays(options: RaysOptions = {}): Plugin {
       }
     },
 
+    // The dev server waits for this as it closes, so no build is still
+    // writing to the project once `server.close()` resolves. A change can
+    // queue one more build while it waits.
+    async closeBundle() {
+      let waited: Promise<void> | undefined;
+      while (tail !== waited) {
+        waited = tail;
+        await waited;
+      }
+    },
+
     resolveId(id) {
       const specifier = workerSpecifier(id);
       if (specifier !== undefined) return `\0${specifier}`;

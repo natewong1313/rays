@@ -7,6 +7,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -41,7 +42,9 @@ process.exit(failOn && args.some((arg) => arg.includes(failOn)) ? 3 : 0);
 `;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), "rays-commands-"));
+  // The real path, as `process.cwd()` gives it in the command: on macOS the
+  // temporary directory is behind a symlink (/var is /private/var).
+  root = await realpath(await mkdtemp(path.join(tmpdir(), "rays-commands-")));
   log = path.join(root, "wrangler.log");
   const bin = path.join(root, "node_modules", ".bin");
   await mkdir(bin, { recursive: true });

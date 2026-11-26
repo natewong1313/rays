@@ -2,7 +2,7 @@
 // fixture is compiled once, with its dependencies, by global-setup.ts, so
 // each test only recompiles what it changes.
 
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, inject } from "vitest";
@@ -19,7 +19,10 @@ export function useFixture(): Fixture {
   let root: string | undefined;
 
   beforeEach(async () => {
-    root = await mkdtemp(path.join(tmpdir(), "rays-test-"));
+    // The real path: on macOS the temporary directory is behind a symlink
+    // (/var is /private/var), and Vite resolves imports through it, so a
+    // module imported by the other path would load a second time.
+    root = await realpath(await mkdtemp(path.join(tmpdir(), "rays-test-")));
     await cp(inject("fixtureTemplate"), root, { recursive: true });
   });
 

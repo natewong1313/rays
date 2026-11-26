@@ -5,7 +5,8 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { fc, it } from "@fast-check/vitest";
+import { afterEach, beforeEach, describe, expect } from "vitest";
 import {
   defaultWorkerName,
   readGleamToml,
@@ -13,6 +14,22 @@ import {
   writeWranglerConfigs,
   type ManagedProject,
 } from "./managed.ts";
+
+const letter = fc.constantFrom(..."abcdefghijklmnopqrstuvwxyz");
+const letterDigitOrUnderscore = fc.constantFrom(
+  ..."abcdefghijklmnopqrstuvwxyz0123456789_",
+);
+const segment = fc
+  .tuple(letter, fc.string({ unit: letterDigitOrUnderscore }))
+  .map(([first, rest]) => first + rest);
+
+/** A Gleam package name, such as "my_app". */
+const packageName = segment;
+
+/** A Gleam module name, such as "my_app" or "my_app/admin_api". */
+const moduleName = fc
+  .array(segment, { minLength: 1 })
+  .map((segments) => segments.join("/"));
 
 let root: string;
 
@@ -334,4 +351,37 @@ describe("defaultWorkerName", () => {
     );
     expect(defaultWorkerName("my_app", "jobs")).toBe("my-app-jobs");
   });
+
+  it.prop([packageName, moduleName])(
+    "always gives lowercase letters, digits and dashes",
+    (packageName, module) => {
+      expect(defaultWorkerName(packageName, module)).toMatch(
+        /^[a-z][a-z0-9-]*$/,
+      );
+    },
+  );
+
+  it.prop([packageName, moduleName])(
+    "starts with the package's name",
+    (packageName, module) => {
+      expect(defaultWorkerName(packageName, module)).toMatch(
+        new RegExp(`^${dashed(packageName)}(-|$)`),
+      );
+    },
+  );
+
+  it.prop([packageName, moduleName])(
+    "names a module the same with or without the package's prefix",
+    (packageName, module) => {
+      fc.pre(module !== packageName);
+      expect(defaultWorkerName(packageName, `${packageName}/${module}`)).toBe(
+        defaultWorkerName(packageName, module),
+      );
+    },
+  );
 });
+
+/** `name` with dashes for underscores, as Worker names have them. */
+function dashed(name: string): string {
+  return name.replaceAll("_", "-");
+}
