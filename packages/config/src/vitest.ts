@@ -34,11 +34,12 @@
  * @module
  */
 
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ConfigContext } from "cf/config";
 import { build as bundle } from "vite";
-import { build, readPackageName } from "@rays/core/build";
+import { compile, entrySource, selectDurableObjects } from "@rays/core/build";
+import { parseEntrypoint, type WorkerEntrypoint } from "./entrypoint.ts";
 
 /** A Worker configuration, as `cloudflare.config.ts` holds it. */
 interface WorkerLike {
@@ -86,8 +87,10 @@ export interface RaysTestWorkersOptions {
  * `bindings.worker()` bindings. Only Workers made with `raysWorker()` are
  * built. Alternatively, pass the rays Worker configurations to run.
  *
- * Each Worker is built as for a deployment: `rays build` writes its entry
- * module, and Vite bundles it into `.rays/test/<name>.js`. Its name,
+ * Each Worker is built as for a deployment: its entry module, as the
+ * `rays()` plugin makes it, is written to `.rays/test/<name>.entry.js`, with
+ * the Durable Object classes its configuration declares, and Vite bundles it
+ * into `.rays/test/<name>.js`. Its name,
  * compatibility date and flags come from its configuration, and so do its
  * `bindings.text()`, `bindings.json()`, `bindings.worker()` and
  * `bindings.durableObject()` bindings. A Worker bound only through a Durable
@@ -98,6 +101,8 @@ export interface RaysTestWorkersOptions {
  *
  * @throws {TypeError} If a Worker has a binding this can't set up, and no
  *   `overrides` entry for that Worker.
+ * @throws {BuildError} If the project fails to compile, or a Worker declares
+ *   a Durable Object class that isn't in the project.
  */
 export async function raysTestWorkers(
   from: CloudflareConfigInput | readonly CloudflareConfigInput[],
@@ -109,24 +114,36 @@ export async function raysTestWorkers(
     ? await Promise.all(from.map((worker) => resolve(worker, ctx)))
     : await boundWorkers(await resolve(from, ctx), ctx);
 
-  const rays = workers.filter((worker) => raysModule(worker) !== undefined);
+  const rays = workers.flatMap((worker) => {
+    const entrypoint = raysEntrypoint(worker);
+    return entrypoint === undefined ? [] : [{ worker, entrypoint }];
+  });
   if (rays.length === 0) return [];
 
-  // `raysWorker()` without `module` means the module named after the
-  // package, as for the rays() plugin's default.
-  const packageName = await readPackageName(root);
-  const moduleOf = (worker: WorkerLike) => raysModule(worker) || packageName;
-  const modules = [...new Set(rays.map(moduleOf))];
-  const entries = await build({ root, modules });
-  const entryFor = (module: string) =>
-    entries.find((entry) => entry.module === module)!.path;
-
+  const project = await compile({ root });
   const outDir = path.join(root, ".rays", "test");
   await mkdir(outDir, { recursive: true });
   const result: TestWorkerOptions[] = [];
-  for (const worker of rays) {
+  for (const { worker, entrypoint } of rays) {
     const name = nameOf(worker);
     const scriptPath = path.join(outDir, `${name}.js`);
+    const entry = path.join(outDir, `${name}.entry.js`);
+    // `raysWorker()` without `module` means the module named after the
+    // package, as for the rays() plugin's default.
+    const module = entrypoint.module || project.packageName;
+    await writeFile(
+      entry,
+      entrySource(module, project.workerModule(module), {
+        generator: "raysTestWorkers()",
+        typescript: false,
+        rpc: project.rpc,
+        durableObjects: selectDurableObjects(
+          project.durableObjects,
+          entrypoint.objects,
+        ),
+        specifier: (file) => relativeSpecifier(outDir, file),
+      }),
+    );
     await bundle({
       configFile: false,
       root,
@@ -137,7 +154,7 @@ export async function raysTestWorkers(
         minify: false,
         target: "esnext",
         lib: {
-          entry: entryFor(moduleOf(worker)),
+          entry,
           formats: ["es"],
           fileName: () => `${name}.js`,
         },
@@ -193,18 +210,18 @@ async function boundWorkers(
   return [...found.values()];
 }
 
-// The Gleam module a rays Worker comes from, `""` for the default one, or
-// `undefined` if `raysWorker()` didn't make it.
-function raysModule(worker: WorkerLike): string | undefined {
-  const entrypoint = worker.entrypoint;
-  if (entrypoint === "virtual:rays/worker") return "";
-  if (
-    typeof entrypoint === "string" &&
-    entrypoint.startsWith("virtual:rays/worker/")
-  ) {
-    return entrypoint.slice("virtual:rays/worker/".length);
-  }
-  return undefined;
+// The rays Worker entrypoint of a Worker's configuration, or `undefined`
+// if `raysWorker()` didn't make it.
+function raysEntrypoint(worker: WorkerLike): WorkerEntrypoint | undefined {
+  return typeof worker.entrypoint === "string"
+    ? parseEntrypoint(worker.entrypoint)
+    : undefined;
+}
+
+// The import specifier of `file` from a module in `dir`.
+function relativeSpecifier(dir: string, file: string): string {
+  const relative = path.relative(dir, file).split(path.sep).join("/");
+  return relative.startsWith(".") ? relative : `./${relative}`;
 }
 
 function nameOf(worker: WorkerLike): string {

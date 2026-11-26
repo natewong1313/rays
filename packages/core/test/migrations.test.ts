@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { BuildError, compile, readDurableObjectClasses } from "../src/build.ts";
+import { BuildError, compile } from "../src/build.ts";
 import { useFixture } from "./fixture.ts";
 
 const fixture = useFixture();
@@ -84,15 +84,6 @@ pub const all: List(Migration) = [
 
     expect(await read("src/app/migrations.gleam")).toContain(
       'Migration(name: "0002_more", sql: "create table u (b);")',
-    );
-  });
-
-  it("is written by the synchronous class reader too", async () => {
-    await write("src/app/migrations/0001_create.sql", "create table t (a);");
-    readDurableObjectClasses({ root: fixture.root });
-
-    expect(await read("src/app/migrations.gleam")).toContain(
-      'Migration(name: "0001_create", sql: "create table t (a);")',
     );
   });
 

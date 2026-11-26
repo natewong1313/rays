@@ -21,3 +21,15 @@ declare module "virtual:rays/worker/*" {
   };
   export default worker;
 }
+
+/**
+ * A Worker with the Durable Object classes it declares, as `raysWorker()`
+ * writes its entrypoint: `virtual:rays/worker?objects=ChatRoom`, or
+ * `virtual:rays/worker/app/admin?objects=ChatRoom`.
+ */
+declare module "virtual:rays/worker?*" {
+  const worker: {
+    fetch(request: Request, env: unknown, ctx: unknown): Promise<Response>;
+  };
+  export default worker;
+}

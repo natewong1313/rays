@@ -124,14 +124,16 @@ describe("raysTestWorkers", () => {
     await fixture.write("src/app/names.gleam", names);
     await fixture.write(
       "src/app/room.gleam",
-      "import rays/durable_object\n\npub fn room() -> durable_object.DurableObject(Nil) {\n  durable_object.new(Nil)\n}\n",
+      "import rays/durable_object\n\npub fn room() -> durable_object.DurableObject(Nil) {\n  durable_object.new(Nil)\n}\n\npub fn old() -> durable_object.DurableObject(Nil) {\n  durable_object.new(Nil)\n}\n\npub fn unused() -> durable_object.DurableObject(Nil) {\n  durable_object.new(Nil)\n}\n",
     );
     const rooms: Record<string, unknown> = {
       name: "rooms",
-      entrypoint: "virtual:rays/worker/app/names",
+      // As raysWorker() writes it for these exports.
+      entrypoint: "virtual:rays/worker/app/names?objects=Old,Room",
       exports: {
         Room: { type: "durable-object", storage: "sqlite" },
         Old: { type: "durable-object", storage: "legacy-kv" },
+        Gone: { type: "durable-object", state: "deleted" },
       },
     };
     rooms.env = {
@@ -172,6 +174,8 @@ describe("raysTestWorkers", () => {
     const source = await readFile(worker!.scriptPath, "utf8");
     expect(source).toMatch(/\$rays_class_Room = class extends DurableObject/);
     expect(source).toMatch(/\$rays_class_Room as Room/);
+    // Only the classes it declares.
+    expect(source).not.toMatch(/\$rays_class_Unused/);
   });
 
   it("returns nothing when no rays Worker is bound", async () => {

@@ -62,7 +62,7 @@ export function runGleam(
 }
 
 /** The error for a `root` without a `gleam.toml`. */
-export function noGleamToml(root: string): BuildError {
+function noGleamToml(root: string): BuildError {
   return new BuildError(
     `No gleam.toml in ${root}. Run rays from the directory that holds gleam.toml and package.json.`,
   );
@@ -114,14 +114,6 @@ export async function readInterface(
   return parseInterface(
     await runGleam(gleam, root, EXPORT_INTERFACE, { output: "quiet" }),
   );
-}
-
-/**
- * {@link readInterface}, synchronously, for configuration that is evaluated
- * synchronously. What Gleam prints is kept in the error, not printed.
- */
-export function readInterfaceSync(gleam: string, root: string): Interface {
-  return parseInterface(runGleamSync(gleam, root, EXPORT_INTERFACE));
 }
 
 /**

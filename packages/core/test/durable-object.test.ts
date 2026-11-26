@@ -9,7 +9,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { build, compile, readDurableObjectClasses } from "../src/build.ts";
+import { build, compile, selectDurableObjects } from "../src/build.ts";
 import { useFixture } from "./fixture.ts";
 
 const fixture = useFixture();
@@ -245,24 +245,36 @@ describe("calls that fail in the runtime", () => {
   });
 });
 
-describe("readDurableObjectClasses", () => {
-  it("reads the class names synchronously", async () => {
+describe("selectDurableObjects", () => {
+  const lobby =
+    "import rays/durable_object\n\npub fn lobby() -> durable_object.DurableObject(Nil) {\n  durable_object.new(Nil)\n}\n";
+
+  it("keeps only the classes it is given", async () => {
     await writeProject();
-    expect(readDurableObjectClasses({ root: fixture.root })).toEqual([
-      "Counter",
-    ]);
+    await fixture.write("src/app/lobby.gleam", lobby);
+    const { durableObjects } = await compile({ root: fixture.root });
+    const names = (names?: string[]) =>
+      selectDurableObjects(durableObjects, names)?.classes.map(
+        (object) => object.className,
+      );
+    expect(names()).toEqual(["Counter", "Lobby"]);
+    expect(names(["Lobby"])).toEqual(["Lobby"]);
+    expect(selectDurableObjects(durableObjects, [])).toBeUndefined();
+    // The methods stay: every class has them all.
+    expect(
+      selectDurableObjects(durableObjects, ["Lobby"])?.methods.length,
+    ).toBe(durableObjects?.methods.length);
   });
 
-  it("refuses a directory without gleam.toml", () => {
-    expect(() => readDurableObjectClasses({ root: "/nowhere" })).toThrow(
-      "No gleam.toml in /nowhere.",
+  it("refuses a class the project doesn't have", async () => {
+    await writeProject();
+    const { durableObjects } = await compile({ root: fixture.root });
+    expect(() => selectDurableObjects(durableObjects, ["ChatRoom"])).toThrow(
+      "The Worker's exports declare the Durable Object class ChatRoom, but there is no pub fn chat_room() that returns a durable_object.DurableObject. The project's classes are Counter. " +
+        'If ChatRoom was renamed, declare it with exports.durableObject({ state: "renamed", renamedTo: "<new name>" }). If it was removed, declare it with exports.durableObject({ state: "deleted" }).',
     );
-  });
-
-  it("reports a project that doesn't compile", async () => {
-    await fixture.write("src/app/broken.gleam", "pub fn broken( {\n");
-    expect(() => readDurableObjectClasses({ root: fixture.root })).toThrow(
-      "gleam export failed.",
+    expect(() => selectDurableObjects(undefined, ["ChatRoom"])).toThrow(
+      "The project has no Durable Object classes.",
     );
   });
 });

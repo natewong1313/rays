@@ -8,6 +8,7 @@ import {
   type NamedType,
   type TypeInterface,
 } from "./package-interface.ts";
+import type { DurableObjects } from "./rpc/build.ts";
 
 /**
  * A Durable Object class: a public function in the project with no
@@ -61,6 +62,48 @@ export function findDurableObjectClasses(
     }
   }
   return classes;
+}
+
+/**
+ * The project's Durable Object classes narrowed to the classes `names`, the
+ * ones a Worker's configuration declares, or `undefined` if that leaves
+ * none. Without `names`, every class is kept.
+ *
+ * @throws {BuildError} If a class in `names` isn't one of the project's.
+ */
+export function selectDurableObjects(
+  objects: DurableObjects | undefined,
+  names: readonly string[] | undefined,
+): DurableObjects | undefined {
+  if (names === undefined) return objects;
+  const found = objects?.classes ?? [];
+  const missing = names.filter(
+    (name) => !found.some((object) => object.className === name),
+  );
+  if (missing.length > 0) throw notAClass(missing[0]!, found);
+  const classes = found.filter((object) => names.includes(object.className));
+  return objects === undefined || classes.length === 0
+    ? undefined
+    : { ...objects, classes };
+}
+
+function notAClass(
+  name: string,
+  found: readonly DurableObjectClass[],
+): BuildError {
+  const classes =
+    found.length === 0
+      ? "The project has no Durable Object classes."
+      : `The project's classes are ${found.map((object) => object.className).join(", ")}.`;
+  return new BuildError(
+    `The Worker's exports declare the Durable Object class ${name}, but there is no pub fn ${functionName(name)}() that returns a durable_object.DurableObject. ${classes} ` +
+      `If ${name} was renamed, declare it with exports.durableObject({ state: "renamed", renamedTo: "<new name>" }). If it was removed, declare it with exports.durableObject({ state: "deleted" }).`,
+  );
+}
+
+// The Gleam function name for a class name: `ChatRoom` is `chat_room`.
+function functionName(className: string): string {
+  return className.replace(/(?<=.)([A-Z])/g, "_$1").toLowerCase();
 }
 
 /** The class name for a Gleam function name: `chat_room` is `ChatRoom`. */

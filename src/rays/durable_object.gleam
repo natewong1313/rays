@@ -130,12 +130,26 @@
 ////
 //// ## How it works
 ////
-//// `rays build` and the `rays()` Vite plugin export a class from every
-//// Worker's entry module for each public function in the package that takes
-//// no arguments and returns a `DurableObject`. The class is named after the
-//// function in PascalCase, so `chat_room` exports `ChatRoom`. That is the
-//// name the Cloudflare configuration uses: `raysWorker()` from
-//// `@rays/config/cf` declares the project's classes for you.
+//// Every public function in the package that takes no arguments and
+//// returns a `DurableObject` is a class, named after the function in
+//// PascalCase, so `chat_room` is `ChatRoom`. That is the name the Cloudflare
+//// configuration declares in the Worker's `exports`:
+////
+//// ```ts
+//// // cloudflare.config.ts
+//// worker: raysWorker({
+////   name: "my-app",
+////   compatibilityDate: "2026-09-01",
+////   exports: { ChatRoom: exports.durableObject({ storage: "sqlite" }) },
+//// }),
+//// ```
+////
+//// A Worker's entry module exports only the classes its `exports` declare,
+//// and the build fails if one isn't in the package. A class's name is the
+//// identity of its stored data, so renaming or removing its function also
+//// means keeping the old name in `exports`, with `state: "renamed"` or
+//// `state: "deleted"`. With a Wrangler config file, `rays build` and the
+//// `rays()` Vite plugin export every class from every Worker's entry module.
 ////
 //// Methods work like `rays/worker_rpc`'s: a method is a public function in
 //// the package whose only argument is a `durable_object.Params`, and it

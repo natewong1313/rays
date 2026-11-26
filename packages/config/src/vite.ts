@@ -28,15 +28,17 @@
  * compile is shown in the terminal and the browser's error overlay, and the
  * last good build keeps running. `vite build` fails instead.
  *
- * The module also exports a class for each Durable Object class in the
- * project, from `rays/durable_object`.
+ * The module also exports Durable Object classes, from
+ * `rays/durable_object`: the ones `raysWorker()` declares, or, for a
+ * Wrangler config file's `main`, every class in the project. A class the
+ * configuration declares that isn't in the project fails the build.
  *
  * It works with Cloudflare's Vite plugin v1 (`main` in a Wrangler config
  * file) and v2 (`worker.entrypoint` in `cloudflare.config.ts`). For tests,
  * add it before `cloudflareTest()` in `vitest.config.ts`. Cloudflare's Vitest
  * plugin then warns that it can't analyze the exports of the virtual module.
  * It finds Durable Object classes in the configuration's `exports` instead,
- * where `raysWorker()` declares them, so the warning only matters for named
+ * where they are declared, so the warning only matters for named
  * entrypoints, which rays Workers don't export.
  *
  * With `cloudflare.config.ts`, use `raysWorker()` from `@rays/config/cf`
@@ -58,11 +60,12 @@ import {
   BuildError,
   compile,
   entrySource,
+  selectDurableObjects,
   type Project,
 } from "@rays/core/build";
+import { parseEntrypoint, WORKER_MODULE } from "./entrypoint.ts";
 
-/** The virtual module that exports a rays Worker. */
-export const WORKER_MODULE = "virtual:rays/worker";
+export { WORKER_MODULE };
 
 export interface RaysOptions {
   /**
@@ -159,20 +162,18 @@ export function rays(options: RaysOptions = {}): Plugin {
 
   // The source of the Worker module `id`.
   function workerSource(id: string, project: Project): string {
-    const module = moduleFor(id, project);
+    const entrypoint = parseEntrypoint(id.slice(1))!;
+    const module = entrypoint.module || (options.module ?? project.packageName);
     return entrySource(module, project.workerModule(module), {
       generator: "the rays Vite plugin",
       typescript: false,
       rpc: project.rpc,
-      durableObjects: project.durableObjects,
+      durableObjects: selectDurableObjects(
+        project.durableObjects,
+        entrypoint.objects,
+      ),
       specifier: toSpecifier,
     });
-  }
-
-  function moduleFor(id: string, project: Project): string {
-    return id === RESOLVED_PREFIX
-      ? (options.module ?? project.packageName)
-      : id.slice(RESOLVED_PREFIX.length + 1);
   }
 
   function report(error: Error): void {
@@ -256,8 +257,7 @@ function workerSpecifier(id: string): string | undefined {
   const at = id.indexOf(WORKER_MODULE);
   if (at === -1 || (at > 0 && id[at - 1] !== "/")) return undefined;
   const specifier = id.slice(at);
-  const rest = specifier.slice(WORKER_MODULE.length);
-  return rest === "" || rest.startsWith("/") ? specifier : undefined;
+  return parseEntrypoint(specifier) === undefined ? undefined : specifier;
 }
 
 function toSpecifier(file: string): string {

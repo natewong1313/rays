@@ -97,17 +97,49 @@ describe("in development", () => {
     expect(code).toContain("src/admin.gleam");
   });
 
-  it("exports the project's Durable Object classes", async () => {
-    await fixture.write(
-      "src/app/room.gleam",
-      "import gleam/javascript/promise.{type Promise}\nimport rays/durable_object\n\npub fn room() -> durable_object.DurableObject(Int) {\n  durable_object.new(0)\n  |> durable_object.bind(count)\n}\n\npub fn count(params: durable_object.Params(Nil, Int)) -> Promise(Int) {\n  promise.resolve(durable_object.read_memory(params.memory))\n}\n",
-    );
-    const { server } = await start();
+  describe("Durable Object classes", () => {
+    const room =
+      "import gleam/javascript/promise.{type Promise}\nimport rays/durable_object\n\npub fn room() -> durable_object.DurableObject(Int) {\n  durable_object.new(0)\n  |> durable_object.bind(count)\n}\n\npub fn count(params: durable_object.Params(Nil, Int)) -> Promise(Int) {\n  promise.resolve(durable_object.read_memory(params.memory))\n}\n";
+    const lobby =
+      "import rays/durable_object\n\npub fn lobby() -> durable_object.DurableObject(Nil) {\n  durable_object.new(Nil)\n}\n";
+
     // Loaded but not imported: Node.js has no cloudflare:workers.
-    const loaded = await server.pluginContainer.load("\0virtual:rays/worker");
-    const code = typeof loaded === "string" ? loaded : loaded?.code;
-    expect(code).toContain("export { $rays_class_Room as Room };");
-    expect(code).toContain("  count(call) {");
+    async function source(server: ViteDevServer, id: string) {
+      const loaded = await server.pluginContainer.load(`\0${id}`);
+      return typeof loaded === "string" ? loaded : loaded?.code;
+    }
+
+    it("exports every class without a list", async () => {
+      await fixture.write("src/app/room.gleam", room);
+      await fixture.write("src/app/lobby.gleam", lobby);
+      const { server } = await start();
+      const code = await source(server, "virtual:rays/worker");
+      expect(code).toContain("export { $rays_class_Room as Room };");
+      expect(code).toContain("export { $rays_class_Lobby as Lobby };");
+      expect(code).toContain("  count(call) {");
+    });
+
+    it("exports only the classes it lists", async () => {
+      await fixture.write("src/app/room.gleam", room);
+      await fixture.write("src/app/lobby.gleam", lobby);
+      const { server } = await start();
+      const code = await source(server, "virtual:rays/worker?objects=Room");
+      expect(code).toContain("export { $rays_class_Room as Room };");
+      expect(code).not.toContain("Lobby");
+
+      const none = await source(server, "virtual:rays/worker/app?objects=");
+      expect(none).not.toContain("$rays_class_");
+    });
+
+    it("refuses a listed class that isn't in the project", async () => {
+      await fixture.write("src/app/room.gleam", room);
+      const { server } = await start();
+      await expect(
+        source(server, "virtual:rays/worker?objects=ChatRoom"),
+      ).rejects.toThrow(
+        "The Worker's exports declare the Durable Object class ChatRoom, but there is no pub fn chat_room()",
+      );
+    });
   });
 
   it("accepts the path Cloudflare's Vitest plugin asks for", async () => {

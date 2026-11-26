@@ -10,18 +10,14 @@
  * @module
  */
 
-import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { findDurableObjectClasses } from "./build/durable-object.ts";
 import { entrySource } from "./build/entry.ts";
 import { relativeSpecifier, writeIfChanged } from "./build/files.ts";
 import { writeMigrationModules } from "./build/migrations.ts";
 import {
   gleamBinary,
-  noGleamToml,
   readInterface,
-  readInterfaceSync,
   readPackageName,
   runGleam,
 } from "./build/gleam.ts";
@@ -36,7 +32,10 @@ export { BuildError } from "./build/error.ts";
 export { entrySource, type EntryOptions } from "./build/entry.ts";
 export { readPackageName } from "./build/gleam.ts";
 export { isModuleName, notAModuleName } from "./build/module-name.ts";
-export type { DurableObjectClass } from "./build/durable-object.ts";
+export {
+  selectDurableObjects,
+  type DurableObjectClass,
+} from "./build/durable-object.ts";
 export type {
   BuiltDurableObjectClass,
   DurableObjects,
@@ -91,7 +90,9 @@ export interface Project {
   rpc: WorkerRpc | undefined;
   /**
    * The project's Durable Object classes, for `rays/durable_object`, or
-   * `undefined` if it has none. Every Worker's entry module exports them.
+   * `undefined` if it has none. A Worker's entry module exports them all,
+   * or the ones its configuration declares, with
+   * {@link selectDurableObjects}.
    */
   durableObjects: DurableObjects | undefined;
   /**
@@ -193,29 +194,4 @@ export async function build(options: BuildOptions): Promise<Entry[]> {
     entries.push({ module, path: entry, changed });
   }
   return entries;
-}
-
-/**
- * The class names of the project's Durable Object classes, as the entry
- * modules export them, sorted.
- *
- * It is synchronous, for configuration that is evaluated synchronously, such
- * as `raysWorker()`'s. Gleam compiles the project to read its types, so it
- * takes as long as a build, and it writes the project's migrations modules
- * first, as {@link compile} does.
- *
- * @throws {BuildError} If there is no `gleam.toml` in `root`, the project
- *   fails to compile, or a class can't be used, for example because two have
- *   the same name.
- */
-export function readDurableObjectClasses(options: {
-  root: string;
-  gleam?: string | undefined;
-}): string[] {
-  const root = path.resolve(options.root);
-  if (!existsSync(path.join(root, "gleam.toml"))) throw noGleamToml(root);
-  const gleam = gleamBinary(options.gleam);
-  writeMigrationModules(root, gleam);
-  const modules = readInterfaceSync(gleam, root);
-  return findDurableObjectClasses(modules).map((object) => object.className);
 }
