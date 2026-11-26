@@ -169,6 +169,30 @@ describe("rescheduling", () => {
     expect(await generation("moved")).not.toBe(before);
   });
 
+  it("keeps distinct times before the Unix epoch", async () => {
+    await runInDurableObject(stub("before-epoch"), (_, state) => {
+      const ctx = state as never;
+      const scheduled = () =>
+        state.storage.sql
+          .exec<{ generation: string; scheduled_at: number }>(
+            "select generation, scheduled_at from rays_alarms",
+          )
+          .one();
+
+      expect(reminders.schedule(ctx, "past", -2_000)).toBe("Ok(Nil)");
+      const first = scheduled();
+      expect(first.scheduled_at).toBe(-2_000);
+
+      expect(reminders.schedule(ctx, "past", -1_000)).toBe("Ok(Nil)");
+      const second = scheduled();
+      expect(second.scheduled_at).toBe(-1_000);
+      expect(second.generation).not.toBe(first.generation);
+    });
+    await waitFor(async () =>
+      expect((await runs("before-epoch")).map((run) => run.key)).toEqual(["past"]),
+    );
+  });
+
   it("for the same time sets the instance's alarm again if it is missing", async () => {
     const at = Date.now() + HOUR;
     await schedule("rearmed", "visit", at);

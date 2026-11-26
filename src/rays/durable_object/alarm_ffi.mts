@@ -14,13 +14,12 @@
 // attempt that was replaced, cancelled or timed out can't change the row
 // that took its place.
 //
-// Cloudflare only retries a failed `alarm` a few times, then drops it, so
-// `runAlarms` never fails: each row keeps its own count of attempts and its
-// own backoff instead.
+// Each row keeps its own attempt count and backoff. The runner schedules
+// a recovery wake on failure and lets Cloudflare retry if that write fails.
 
 import { Result$Error, Result$Ok } from "../../gleam.mjs";
 import type { Result } from "../../gleam.mjs";
-import type { Env } from "../worker_ffi.mts";
+import { describeError, type Env } from "../worker_ffi.mts";
 
 export type AlarmFunction = (alarm: unknown) => Promise<unknown>;
 
@@ -160,7 +159,6 @@ type Row = {
   key: string;
   generation: string;
   scheduled_at: number;
-  next_attempt_at: number;
   attempt: number;
 };
 
@@ -271,7 +269,7 @@ export function schedule(
   const registered = registeredHere(ctx, handler);
   if (!("name" in registered)) return registered;
   const { name, instance } = registered;
-  const time = Math.max(0, Math.trunc(at));
+  const time = Math.trunc(at);
   try {
     ctx.storage.transactionSync(() => {
       const sql = ctx.storage.sql;
@@ -433,13 +431,12 @@ export async function runAlarms(ctx: DurableObjectState): Promise<void> {
     }
     arm(ctx, instance);
   } catch (error) {
-    // Not thrown, so that Cloudflare doesn't drop the alarm after a few
-    // retries: rays retries it instead.
+    // Use Cloudflare's retries if we can't schedule our own.
     console.error({
       message: "rays couldn't run the instance's alarms",
       error: messageOf(error),
     });
-    settleQuietly(ctx.storage.setAlarm(Date.now() + FAILED_RUN_RETRY));
+    await ctx.storage.setAlarm(Date.now() + FAILED_RUN_RETRY);
   }
 }
 
@@ -459,8 +456,7 @@ function runnable(
   );
   return sql
     .exec<Row>(
-      `select a.handler, a.key, a.generation, a.scheduled_at,
-              a.next_attempt_at, a.attempt
+      `select a.handler, a.key, a.generation, a.scheduled_at, a.attempt
        from ${TABLE} a
        where a.status = 'pending' and a.next_attempt_at <= ?
          and not exists (
@@ -627,18 +623,22 @@ function storeOutcome(
     case "give_up":
       fail(sql, row, attempt, reason);
       return;
-    case "retry":
+    case "retry": {
       if (attempt >= config.maxAttempts) {
         fail(sql, row, attempt, reason);
         return;
       }
-      sql.exec(
-        `update ${TABLE} set next_attempt_at = ?, reason = ?
-         where ${owns} and status = 'pending'`,
-        Date.now() + Math.max(0, config.delay(attempt)),
-        reason,
-        ...guard,
-      );
+      const retried =
+        sql
+          .exec(
+            `update ${TABLE} set next_attempt_at = ?, reason = ?
+             where ${owns} and status = 'pending' returning key`,
+            Date.now() + Math.max(0, config.delay(attempt)),
+            reason,
+            ...guard,
+          )
+          .toArray().length > 0;
+      if (!retried) return;
       console.warn({
         message: "An alarm failed, and will be tried again",
         handler: row.handler,
@@ -647,6 +647,7 @@ function storeOutcome(
         reason,
       });
       return;
+    }
   }
 }
 
@@ -682,10 +683,5 @@ function fail(
 }
 
 function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  try {
-    return String(error);
-  } catch {
-    return "an error that can't be shown";
-  }
+  return describeError(error, "an error that can't be shown")[1];
 }
