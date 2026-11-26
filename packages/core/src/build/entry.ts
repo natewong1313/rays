@@ -29,6 +29,8 @@ export interface EntryOptions {
  * the project's Durable Object classes, with one method for each of the
  * project's Durable Object methods.
  *
+ * With either, it also gives `rays/trace` the runtime's tracing API.
+ *
  * The module is self-contained: it doesn't import `@rays/core`, so it
  * works in projects that only depend on Wrangler.
  */
@@ -41,8 +43,36 @@ export function entrySource(
     workerSource(module, compiled, options) +
     (options.durableObjects === undefined
       ? ""
-      : objectsSource(options.durableObjects, options))
+      : objectsSource(options.durableObjects, options)) +
+    tracingSource(options)
   );
+}
+
+// Gives rays/trace the runtime's tracing API, which it reaches a Durable
+// Object by alone: a Durable Object gets no `ctx.tracing`. Only modules with
+// RPC methods or Durable Objects do this, as they import `cloudflare:workers`
+// anyway; a module with only `fetch` doesn't, so it loads outside the
+// runtime too, and its Worker hands over `ctx.tracing` on each request.
+//
+// `useTracing` comes from the FFI module the entry already imports. The
+// import is a namespace one, so a runtime without `tracing` still loads the
+// module: the export is then `undefined`, which `useTracing` ignores.
+function tracingSource({
+  rpc,
+  durableObjects,
+  typescript,
+  specifier,
+}: EntryOptions): string {
+  const ffi = (rpc ?? durableObjects)?.ffi;
+  if (ffi === undefined) return "";
+  const ignore = typescript ? "// @ts-ignore\n" : "";
+  return `
+// Lets rays/trace use the runtime's tracing API.
+${ignore}import * as $rays_workers from "cloudflare:workers";
+${ignore}import { useTracing as $rays_useTracing } from ${JSON.stringify(specifier(ffi))};
+
+${ignore}$rays_useTracing($rays_workers.tracing);
+`;
 }
 
 // One method for each name, which calls `body(name)`. Methods in different

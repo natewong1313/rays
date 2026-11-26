@@ -25,6 +25,10 @@ import {
 } from "./worker_rpc_ffi.mts";
 import type { Env } from "./worker_ffi.mts";
 
+// Entry modules with Durable Objects hand the runtime's tracing API to
+// `rays/trace` through this module, which they import anyway.
+export { useTracing } from "./trace_ffi.mts";
+
 // Classes
 
 type Handler = (

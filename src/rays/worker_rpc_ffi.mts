@@ -37,6 +37,10 @@ import * as gleamDict from "../../gleam_stdlib/gleam/dict.mjs";
 import { describeError } from "./worker_ffi.mts";
 import type { Env, Worker } from "./worker_ffi.mts";
 
+// Entry modules with RPC methods hand the runtime's tracing API to
+// `rays/trace` through this module, which they import anyway.
+export { useTracing } from "./trace_ffi.mts";
+
 type GleamDict = { readonly __dict: unique symbol };
 
 // Looked up when called rather than when this module is evaluated, in case

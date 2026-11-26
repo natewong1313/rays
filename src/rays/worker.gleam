@@ -35,6 +35,7 @@ import gleam/dynamic/decode
 import gleam/http.{type Method}
 import gleam/http/request.{type Request as HttpRequest}
 import gleam/http/response.{type Response as HttpResponse, Response}
+import gleam/int
 import gleam/javascript/array.{type Array}
 import gleam/javascript/promise.{type Promise}
 import gleam/json.{type Json}
@@ -42,6 +43,8 @@ import gleam/list
 import gleam/result
 import gleam/string
 import gleam/uri
+import rays/internal/route
+import rays/trace
 
 //
 // Worker
@@ -91,13 +94,47 @@ type JsResponse
 /// }
 /// ```
 ///
+/// With [tracing](https://developers.cloudflare.com/workers/observability/traces/)
+/// enabled, the Worker also adds to the span Cloudflare records for each
+/// request, as described in `rays/trace`: it names the span after the
+/// request's route, such as `GET /users/:id`, records the response's status,
+/// marks 5xx responses as failed, and records where a panic happened.
+///
 pub fn new(handler: Handler) -> Worker {
+  // The request's span: renamed and given the response's status here. A
+  // panic is recorded on it by `make_worker`, which sees what is thrown.
   make_worker(fn(raw, env, ctx) {
+    let span = trace.current()
     case from_js_request(raw) {
-      Ok(request) -> handler(request, env, ctx) |> promise.map(to_js_response)
+      Ok(request) -> {
+        trace.rename(span, route.span_name(request))
+        use response <- promise.map(handler(request, env, ctx))
+        record_response(span, response)
+        to_js_response(response)
+      }
       Error(detail) -> promise.resolve(to_js_response(bad_request(detail)))
     }
   })
+}
+
+/// Record a response's status on the request's span. A 5xx status is a
+/// failure; a 4xx one is the client's mistake, so it leaves the span as it
+/// is, as OpenTelemetry's conventions for servers say.
+///
+fn record_response(span: trace.Span, response: Response) -> Nil {
+  let span =
+    trace.set_attributes(span, [
+      #("http.response.status_code", trace.int(response.status)),
+    ])
+  let _ = case response.status >= 500 {
+    True ->
+      trace.set_status(
+        span,
+        trace.Failed("Responded with " <> int.to_string(response.status)),
+      )
+    False -> span
+  }
+  Nil
 }
 
 /// Convert a Fetch API `Request` into a Gleam request. The error is a detail

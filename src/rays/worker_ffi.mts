@@ -12,6 +12,7 @@ import {
   Result$Ok,
 } from "../gleam.mjs";
 import type { BitArray, Result } from "../gleam.mjs";
+import { activeSpan, recordThrown, useTracing } from "./trace_ffi.mts";
 
 export type Env = Record<string, unknown>;
 
@@ -25,8 +26,24 @@ const WORKER_BRAND = Symbol.for("rays.worker");
 export type Worker = ExportedHandler<Env> & { readonly [WORKER_BRAND]: true };
 
 // `ExportedHandler` and others are from `@cloudflare/workers-types`.
+//
+// Each request hands `ctx.tracing` to `rays/trace`, for Workers whose entry
+// module doesn't, and records an error the handler throws, such as a Gleam
+// panic, on the request's span before passing it on to the runtime.
 export function makeWorker(fetch: ExportedHandlerFetchHandler<Env>): Worker {
-  return { fetch, [WORKER_BRAND]: true };
+  return {
+    async fetch(request, env, ctx) {
+      useTracing(ctx.tracing);
+      const span = activeSpan();
+      try {
+        return await fetch(request, env, ctx);
+      } catch (error) {
+        recordThrown(span, error);
+        throw error;
+      }
+    },
+    [WORKER_BRAND]: true,
+  };
 }
 
 // The bytes of an aligned bit array, without copying.
