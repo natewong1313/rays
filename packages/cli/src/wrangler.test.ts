@@ -19,14 +19,9 @@ import {
   hasOption,
   selectedEnvironment,
   withConfigs,
-} from "../src/wrangler.ts";
+} from "./wrangler.ts";
 
-const cli = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "src",
-  "cli.ts",
-);
+const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.ts");
 
 let root: string;
 let log: string;

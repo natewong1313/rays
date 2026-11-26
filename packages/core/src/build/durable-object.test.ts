@@ -9,8 +9,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { build, compile, selectDurableObjects } from "../src/build.ts";
-import { useFixture } from "./fixture.ts";
+import { build, compile, selectDurableObjects } from "../build.ts";
+import { useFixture } from "../../test/fixture.ts";
 
 const fixture = useFixture();
 

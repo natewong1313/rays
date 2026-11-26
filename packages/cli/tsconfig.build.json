@@ -12,5 +12,7 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Tests sit next to the modules they test; the build leaves them out.
+  "exclude": ["src/**/*.test.ts"]
 }

@@ -14,5 +14,6 @@
     "outDir": "dist"
   },
   "include": ["src"],
-  "exclude": ["src/runtime.ts"]
+  // Tests sit next to the modules they test; the build leaves them out.
+  "exclude": ["src/runtime.ts", "src/**/*.test.ts"]
 }

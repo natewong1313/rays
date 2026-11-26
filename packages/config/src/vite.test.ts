@@ -11,8 +11,8 @@ import {
   type ViteDevServer,
 } from "vite";
 import { afterEach, describe, expect, it } from "vitest";
-import { rays, type RaysOptions } from "../src/vite.ts";
-import { fetcher, useFixture } from "./fixture.ts";
+import { rays, type RaysOptions } from "./vite.ts";
+import { fetcher, useFixture } from "../test/fixture.ts";
 
 const fixture = useFixture();
 

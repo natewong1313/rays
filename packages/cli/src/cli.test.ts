@@ -19,7 +19,7 @@ import {
 } from "vitest";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const cli = path.join(here, "..", "src", "cli.ts");
+const cli = path.join(here, "cli.ts");
 const repository = path.resolve(here, "..", "..", "..");
 
 // The fixture, compiled once with its dependencies, so each test only
@@ -29,7 +29,8 @@ let root: string;
 
 beforeAll(async () => {
   template = await mkdtemp(path.join(tmpdir(), "rays-cli-template-"));
-  await cp(path.join(here, "fixtures", "app"), template, { recursive: true });
+  const fixture = path.join(here, "..", "test", "fixtures", "app");
+  await cp(fixture, template, { recursive: true });
   const toml = await readFile(path.join(template, "gleam.toml"), "utf8");
   await writeFile(
     path.join(template, "gleam.toml"),

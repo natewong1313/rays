@@ -5,8 +5,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { raysTestWorkers } from "../src/vitest.ts";
-import { fetcher, useFixture } from "./fixture.ts";
+import { raysTestWorkers } from "./vitest.ts";
+import { fetcher, useFixture } from "../test/fixture.ts";
 
 const fixture = useFixture();
 

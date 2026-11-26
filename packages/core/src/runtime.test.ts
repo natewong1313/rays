@@ -3,7 +3,7 @@
 
 import type { ExecutionContext } from "@cloudflare/workers-types";
 import { describe, expect, it } from "vitest";
-import { handler } from "../src/runtime.ts";
+import { handler } from "./runtime.ts";
 // The compiled `rays/worker` module. `new` is a reserved word in
 // JavaScript, so Gleam exports `worker.new` as `new$`.
 import { new$, ok } from "../../../build/dev/javascript/rays/rays/worker.mjs";

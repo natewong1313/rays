@@ -10,5 +10,7 @@
     // Vitest's dependencies conflict with Node's types.
     "skipLibCheck": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  // Replaces the build config's `exclude`, which leaves out the tests.
+  "exclude": []
 }

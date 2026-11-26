@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const cli = path.join(here, "..", "src", "cli.ts");
+const cli = path.join(here, "cli.ts");
 const repository = path.resolve(here, "..", "..", "..");
 
 // Inside this package, so the projects find its Wrangler in node_modules.

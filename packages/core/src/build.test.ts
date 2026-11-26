@@ -4,8 +4,8 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { build, BuildError } from "../src/build.ts";
-import { fetcher, mainReturning, useFixture } from "./fixture.ts";
+import { build, BuildError } from "./build.ts";
+import { fetcher, mainReturning, useFixture } from "../test/fixture.ts";
 
 const fixture = useFixture();
 const write = (file: string, contents: string) => fixture.write(file, contents);

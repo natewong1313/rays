@@ -7,9 +7,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { build, BuildError, compile } from "../src/build.ts";
-import { FOOTER_MARKER, stripFooter } from "../src/build/rpc/footers.ts";
-import { useFixture } from "./fixture.ts";
+import { build, BuildError, compile } from "../../build.ts";
+import { FOOTER_MARKER, stripFooter } from "./footers.ts";
+import { useFixture } from "../../../test/fixture.ts";
 
 const fixture = useFixture();
 

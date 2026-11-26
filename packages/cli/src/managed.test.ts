@@ -12,7 +12,7 @@ import {
   wranglerConfig,
   writeWranglerConfigs,
   type ManagedProject,
-} from "../src/managed.ts";
+} from "./managed.ts";
 
 let root: string;
 

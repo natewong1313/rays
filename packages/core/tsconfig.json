@@ -17,5 +17,7 @@
     // conflict with each other.
     "skipLibCheck": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  // Replaces the build config's `exclude`, which leaves out the tests.
+  "exclude": []
 }

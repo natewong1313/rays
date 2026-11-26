@@ -5,8 +5,8 @@ import { execFileSync } from "node:child_process";
 import { readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { BuildError, compile } from "../src/build.ts";
-import { useFixture } from "./fixture.ts";
+import { BuildError, compile } from "../build.ts";
+import { useFixture } from "../../test/fixture.ts";
 
 const fixture = useFixture();
 const write = (file: string, contents: string) => fixture.write(file, contents);

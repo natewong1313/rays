@@ -8,7 +8,7 @@ import {
   type InferMainModule,
 } from "cf/config";
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { raysWorker, type RaysWorkerModule } from "../src/cf.ts";
+import { raysWorker, type RaysWorkerModule } from "./cf.ts";
 
 const base = { name: "app", compatibilityDate: "2026-09-01" } as const;
 
