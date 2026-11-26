@@ -437,6 +437,12 @@ pub type Namespace(memory)
 
 /// A client for one instance of a Durable Object class.
 ///
+/// A stub can be kept and called again after a call fails. Some failures,
+/// such as a `Reset`, break the runtime's own stub, so that every later call
+/// through it fails the same way; when that happens, the next `call` makes a
+/// new one. Calls sent after that have no ordering guarantee relative to the
+/// ones that failed.
+///
 pub type Stub(memory)
 
 /// Get the namespace bound to the given name, through a Durable Object
@@ -599,7 +605,8 @@ pub type CallError {
   RpcFailed(reason: worker_rpc.CallError)
   /// The instance was reset while the call waited, so its memory is gone.
   /// That happens when work holding its `lock` panics, rejects, or takes
-  /// longer than 30 seconds. The next call wakes the instance again.
+  /// longer than 30 seconds. The next call, through the same stub or a new
+  /// one, wakes the instance again.
   Reset(method: String, message: String)
   /// The instance has too many requests queued. Retrying adds to its load,
   /// so back off or give up.

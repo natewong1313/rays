@@ -250,18 +250,51 @@ function stubOptions(
       };
 }
 
-export function getByName(
-  namespace: Namespace,
-  name: string,
-): DurableObjectStub {
-  return namespace.binding.getByName(name, stubOptions(namespace));
+// Stubs
+//
+// Many exceptions leave a runtime stub broken: every later call through it
+// fails at once with the same exception, even after the instance has woken
+// again. So a `Stub` keeps the means to make its runtime stub, and replaces
+// it on the next call after a send throws. The failed call isn't retried,
+// since only its caller knows whether that is safe; the runtime already
+// retries calls that never reached the instance.
+//
+// Only a send that throws breaks a stub. A method's own errors and panics
+// come back in its reply, and leave the stub as it was.
+class Stub {
+  readonly #make: () => DurableObjectStub;
+  #current: DurableObjectStub;
+  #broken = false;
+  constructor(make: () => DurableObjectStub) {
+    this.#make = make;
+    this.#current = make();
+  }
+
+  // The runtime stub to send the next call through.
+  current(): DurableObjectStub {
+    if (this.#broken) {
+      this.#current = this.#make();
+      this.#broken = false;
+    }
+    return this.#current;
+  }
+
+  // Replace `sent` before the next call, unless a call that failed earlier
+  // already has: calls in flight on a broken stub all fail, and only the
+  // first should make a new one.
+  breakIfCurrent(sent: DurableObjectStub): void {
+    if (this.#current === sent) this.#broken = true;
+  }
 }
 
-export function get(
-  namespace: Namespace,
-  id: DurableObjectId,
-): DurableObjectStub {
-  return namespace.binding.get(id, stubOptions(namespace));
+export function getByName(namespace: Namespace, name: string): Stub {
+  const options = stubOptions(namespace);
+  return new Stub(() => namespace.binding.getByName(name, options));
+}
+
+export function get(namespace: Namespace, id: DurableObjectId): Stub {
+  const options = stubOptions(namespace);
+  return new Stub(() => namespace.binding.get(id, options));
 }
 
 // Ids
@@ -304,11 +337,16 @@ export function idName(id: DurableObjectId): Result<string, undefined> {
 type ObjectFailureKind = "reset" | "overloaded" | "retryable";
 
 export function call(
-  stub: DurableObjectStub,
+  stub: Stub,
   method: MethodFunction,
   args: unknown,
 ): Promise<Result<unknown, Failure<ObjectFailureKind | FailureKind>>> {
-  return callWith(stub as unknown as Service, method, args, sendFailure);
+  const sent = stub.current();
+  // `callWith` asks for the kind of failure only when the send throws.
+  return callWith(sent as unknown as Service, method, args, (error) => {
+    stub.breakIfCurrent(sent);
+    return sendFailure(error);
+  });
 }
 
 // The kind of failure an exception from a Durable Object is. Its exceptions

@@ -19,6 +19,11 @@ export function unwrap<T>(result: unknown): T {
   return Result$Ok$0(result as never) as T;
 }
 
+/** The runtime's stub that a `Stub` sends its next call through. */
+export function runtimeStub(stub: unknown): DurableObjectStub {
+  return (stub as { current(): DurableObjectStub }).current();
+}
+
 /** The namespace of a class this Worker exports, through `ctx.exports`. */
 export function exported(
   classFunction: () => unknown,

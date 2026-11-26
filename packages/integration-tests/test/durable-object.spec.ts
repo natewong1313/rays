@@ -9,6 +9,7 @@ import {
   durableObject,
   exported,
   inspect,
+  runtimeStub,
   sleepy,
   unwrap,
 } from "./gleam.ts";
@@ -74,7 +75,7 @@ describe("memory", () => {
   it("is forgotten when the instance is evicted", async () => {
     await call(counters(), "evicted", counter.add_slowly, 7);
     await evictDurableObject(
-      durableObject.get_by_name(counters(), "evicted") as DurableObjectStub,
+      runtimeStub(durableObject.get_by_name(counters(), "evicted")),
     );
     expect(await read("evicted")).toBe("Ok(0)");
   });
@@ -139,12 +140,23 @@ describe("failures", () => {
     expect(await read("reset-now")).toBe("Ok(0)");
   });
 
+  it("leave a stub that keeps working after the instance resets", async () => {
+    const stub = durableObject.get_by_name(counters(), "reused");
+    const send = (method: (params: never) => Promise<unknown>, args?: number) =>
+      durableObject.call(stub, method as never, args).then(inspect);
+    await send(counter.add_slowly, 7);
+    expect(await send(counter.crash_locked)).toBe(
+      'Error(Reset(method: "crash_locked", message: "the locked work crashed"))',
+    );
+    expect(await send(counter.read)).toBe("Ok(0)");
+    expect(await send(counter.add_slowly, 2)).toBe("Ok(2)");
+  });
+
   // The stub, untyped: its methods take calls in the rays format.
   const rawStub = (name: string) =>
-    durableObject.get_by_name(counters(), name) as unknown as Record<
-      string,
-      (call: unknown) => Promise<unknown>
-    >;
+    runtimeStub(
+      durableObject.get_by_name(counters(), name),
+    ) as unknown as Record<string, (call: unknown) => Promise<unknown>>;
 
   it("refuse a call from a different version", async () => {
     expect(

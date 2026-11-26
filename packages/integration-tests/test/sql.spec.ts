@@ -9,6 +9,7 @@ import {
   exported,
   inspect,
   notes,
+  runtimeStub,
   sqlCheck,
 } from "./gleam.ts";
 
@@ -23,7 +24,7 @@ async function call(name: string, method: unknown, args: unknown) {
 
 // Run a check inside the named instance, with its context.
 function inside<T>(name: string, check: (ctx: never) => T): Promise<T> {
-  return runInDurableObject(stub(name) as DurableObjectStub, (_, state) =>
+  return runInDurableObject(runtimeStub(stub(name)), (_, state) =>
     check(state as never),
   );
 }
@@ -39,7 +40,7 @@ describe("the Notes class", () => {
 
   it("keeps its notes when it is evicted, and doesn't migrate again", async () => {
     await call("kept", notes.add, "acorns");
-    await evictDurableObject(stub("kept") as DurableObjectStub);
+    await evictDurableObject(runtimeStub(stub("kept")));
     expect(await call("kept", notes.recent, 5)).toBe('Ok(["acorns"])');
     expect(await inside("kept", sqlCheck.history)).toBe(
       'Ok(["0001_create_notes", "0002_index_notes"])',
