@@ -1,2 +1,5 @@
 worker-configuration.d.ts linguist-generated
 *.mts linguist-detectable=false
+
+# Exclude unit tests for the npm tooling from GitHub's language bar.
+*.test.ts -linguist-detectable
