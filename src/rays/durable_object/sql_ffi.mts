@@ -1,22 +1,20 @@
-// FFI shim for `rays/durable_object/sql`: an instance's SQLite database,
-// through `ctx.storage.sql`.
-//
-// Values are converted here, both ways: a Gleam `BitArray` is bound as
-// bytes and comes back as one, and a `Bool` is bound as 1 or 0, as the
-// runtime would otherwise bind it as the text "true" or "false". Ints,
-// floats and strings are bound as they are. Failures come back as the
-// runtime's message, which `split_code` takes SQLite's code off.
-
 import {
-  BitArray,
-  Result$Error,
-  Result$isOk,
-  Result$Ok,
-  toList,
+  BitArray$BitArray as gleamBitArray,
+  Result$Error as err,
+  Result$isOk as isOk,
+  Result$Ok as ok,
 } from "../../gleam.mjs";
-import type { List, Result } from "../../gleam.mjs";
+import type { Result } from "../../gleam.mjs";
 
-// Values
+export { toUint8Array as blob } from "../worker_ffi.mts";
+
+/**
+ * Below are helpers that lets sql.int, sql.float, and sql.text
+ * produce the opaque sql.Value type
+ *
+ * This lets us require explicit bind values without writing a wrapper
+ * for every value type.
+ */
 
 type Value = number | string | Uint8Array | null;
 
@@ -24,111 +22,93 @@ export function identity(value: number | string): Value {
   return value;
 }
 
-export function bool(value: boolean): Value {
-  return value ? 1 : 0;
-}
-
 export function null_(): Value {
   return null;
 }
 
-// The bit array's bytes. One that isn't a whole number of bytes is padded
-// with zero bits, as `bit_array.pad_to_bytes` does.
-export function blob(value: BitArray): Value {
-  const bytes = new Uint8Array(value.byteSize);
-  for (let index = 0; index < bytes.length; index++) {
-    bytes[index] = value.byteAt(index);
-  }
-  return bytes;
-}
-
-// Statements
-
-export function exec(
-  ctx: DurableObjectState,
-  sql: string,
-  values: List<Value>,
-): Result<undefined, string> {
-  try {
-    ctx.storage.sql.exec(sql, ...values.toArray());
-    return Result$Ok(undefined);
-  } catch (error) {
-    // SQLite runs an empty script as nothing, but the runtime refuses one.
-    // An empty migration, such as one an ORM starts a custom migration
-    // with, runs as nothing too.
-    const message = messageOf(error);
-    if (message === NO_STATEMENT) return Result$Ok(undefined);
-    return Result$Error(message);
-  }
-}
+// SQL stuff
 
 const NO_STATEMENT = "SQL code did not contain a statement.";
 
-// The rows, each an array of its values in column order. The cursor is read
-// in full here, as one held across an `await` doesn't see a stable snapshot.
+/**
+ * Safely execute a sqlite query.
+ *
+ * If you pass an empty script, we treat it as a no op.
+ */
+export function exec(
+  ctx: DurableObjectState,
+  sql: string,
+  values: Value[],
+): Result<undefined, string> {
+  try {
+    ctx.storage.sql.exec(sql, ...values);
+    return ok(undefined);
+  } catch (error) {
+    const message = getErrorMessage(error);
+    if (message === NO_STATEMENT) {
+      return ok(undefined);
+    }
+    return err(message);
+  }
+}
+
+/**
+ * Execute a sqlite query, get the returned rows, then for each row we convert any ArrayBuffer
+ * (a sqlite blob) into a BitArray so Gleam can decode.
+ *
+ * Unlike exec, this doesn't allow empty queries.
+ */
 export function query(
   ctx: DurableObjectState,
   sql: string,
-  values: List<Value>,
-): Result<List<unknown[]>, string> {
+  values: Value[],
+): Result<unknown[][], string> {
   try {
-    const rows = Array.from(
-      ctx.storage.sql.exec(sql, ...values.toArray()).raw(),
+    const rows = Array.from(ctx.storage.sql.exec(sql, ...values).raw(), (row) =>
+      row.map(fromSqlite),
     );
-    return Result$Ok(toList(rows.map((row) => row.map(fromSqlite))));
+    return ok(rows);
   } catch (error) {
-    return Result$Error(messageOf(error));
+    return err(getErrorMessage(error));
   }
 }
 
 function fromSqlite(value: unknown): unknown {
-  return value instanceof ArrayBuffer
-    ? new BitArray(new Uint8Array(value))
-    : value;
+  return value instanceof ArrayBuffer ? gleamBitArray(new Uint8Array(value)) : value;
 }
 
-function messageOf(error: unknown): string {
+function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
-// "<message>: SQLITE_X", optionally followed by " (extended: SQLITE_X_Y)".
-const CODE = /^([\s\S]*): (SQLITE_[A-Z0-9_]+)(?: \(extended: (SQLITE_[A-Z0-9_]+)\))?$/;
-
-export function split_code(
-  message: string,
-): Result<[string, string], undefined> {
-  const match = CODE.exec(message);
-  if (match === null) return Result$Error(undefined);
-  const [, text, primary, extended] = match;
-  return Result$Ok([text!, extended ?? primary!]);
-}
-
-// Deleting everything
 
 export async function delete_all(ctx: DurableObjectState): Promise<undefined> {
   await ctx.storage.deleteAll();
   return undefined;
 }
 
-// Transactions
-
-// Thrown out of `transactionSync` to roll it back when the function returns
-// an `Error`, which is then returned rather than thrown.
-const ROLLBACK = Symbol("rays.sql.rollback");
-
+const SHOULD_ROLLBACK = Symbol("rays.sql.rollback");
+/**
+ * Starts a transaction on a DO by using ctx.storage.transactionSync
+ *
+ * We roll back on an error result from the transaction work or an exception.
+ */
 export function transaction<A, E>(
   ctx: DurableObjectState,
-  callback: () => Result<A, E>,
+  transactionWork: () => Result<A, E>,
 ): Result<A, E> {
-  let outcome: Result<A, E> | undefined;
+  let result: Result<A, E> | undefined;
   try {
     return ctx.storage.transactionSync(() => {
-      outcome = callback();
-      if (Result$isOk(outcome)) return outcome;
-      throw ROLLBACK;
+      result = transactionWork();
+      if (isOk(result)) {
+        return result;
+      }
+      throw SHOULD_ROLLBACK;
     });
   } catch (error) {
-    if (error === ROLLBACK) return outcome!;
+    if (error === SHOULD_ROLLBACK) {
+      return result!;
+    }
     throw error;
   }
 }

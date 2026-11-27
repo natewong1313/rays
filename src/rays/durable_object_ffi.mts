@@ -7,8 +7,8 @@
 // stub is called with its `callWith`. The registry also holds the classes,
 // which the footers of the modules that define them register.
 
-import { Result$Error, Result$Ok } from "../gleam.mjs";
-import type { Result } from "../gleam.mjs";
+import { List$Empty, List$NonEmpty, Result$Error, Result$Ok } from "../gleam.mjs";
+import type { List, Result } from "../gleam.mjs";
 import {
   callWith,
   checkMethods,
@@ -23,7 +23,7 @@ import {
   type Reply,
   type Service,
 } from "./worker_rpc_ffi.mts";
-import type { Env } from "./worker_ffi.mts";
+import { useEnv, type Env } from "./worker_ffi.mts";
 import {
   checkAlarms,
   rememberInstance,
@@ -59,6 +59,9 @@ export interface Definition {
   readonly wake: Wake | undefined;
   readonly methods: ReadonlyMap<MethodFunction, Handler>;
   readonly alarms: ReadonlyMap<AlarmFunction, AlarmConfig>;
+  // The class's SQL migrations, which the build finds beside its module and
+  // the entry module hands to `checkObject`.
+  readonly migrations?: readonly Migration[];
 }
 
 export function newObject(memory: unknown): Definition {
@@ -121,7 +124,11 @@ export function readMemory(memory: Memory): unknown {
 // and returned a `DurableObject`, and that rays found every method bound to
 // it. The generated entry module calls this once per class, after importing
 // the module whose footer registers it.
-export function checkObject(className: string, source: string): Definition {
+export function checkObject(
+  className: string,
+  source: string,
+  migrations?: readonly Migration[],
+): Definition {
   const classFunction = registeredClass(className);
   if (classFunction === undefined) {
     throw new TypeError(
@@ -144,7 +151,7 @@ export function checkObject(className: string, source: string): Definition {
     `durable_object.bind was given a function that isn't an RPC method, for the class ${className}. A method must be a public function in this package whose only argument is a durable_object.Params.`,
   );
   checkAlarms(checked, className);
-  return checked;
+  return { ...checked, migrations };
 }
 
 // Wake a new instance, from its class's constructor: set its memory, and
@@ -156,6 +163,11 @@ export function wakeObject(
   ctx: DurableObjectState,
   env: Env,
 ): Memory {
+  useEnv(env);
+  migrationStates.set(ctx, {
+    migrations: definition.migrations ?? [],
+    applied: false,
+  });
   const memory = new Memory(definition.memory);
   // Before on_wake, which can schedule alarms.
   rememberInstance(definition, ctx, env, memory);
@@ -171,9 +183,58 @@ export function serveObject(
   env: Env,
   ctx: DurableObjectState,
 ): Promise<Reply> {
+  useEnv(env);
   return serveMethods(definition.methods, name, call, (handler, args) =>
     handler(args, env, ctx, memory),
   );
+}
+
+// Migrations
+//
+// What `rays/durable_object/sql`'s `apply_migrations` needs of an instance:
+// its class's migrations, and whether they have been applied since it woke,
+// so that later calls skip reading the database's migration history.
+
+export interface Migration {
+  readonly name: string;
+  readonly sql: string;
+}
+
+interface MigrationState {
+  readonly migrations: readonly Migration[];
+  applied: boolean;
+}
+
+const migrationStates = new WeakMap<DurableObjectState, MigrationState>();
+
+// The instance's migrations as `#(applied, [#(name, sql)])`, or an error if
+// its class has none, or it wasn't woken by a rays entry module, as under
+// `gleam test`.
+export function classMigrations(
+  ctx: DurableObjectState,
+): Result<[boolean, List<[string, string]>], undefined> {
+  const state = migrationStates.get(ctx);
+  if (state === undefined || state.migrations.length === 0) {
+    return Result$Error(undefined);
+  }
+  let list: List<[string, string]> = List$Empty();
+  for (let i = state.migrations.length - 1; i >= 0; i--) {
+    const { name, sql } = state.migrations[i]!;
+    list = List$NonEmpty([name, sql], list);
+  }
+  return Result$Ok([state.applied, list]);
+}
+
+// Record whether the instance's migrations have been applied: they have
+// once `apply_migrations` succeeds, and haven't once `delete_all` empties
+// the database.
+export function setMigrationsApplied(
+  ctx: DurableObjectState,
+  applied: boolean,
+): undefined {
+  const state = migrationStates.get(ctx);
+  if (state !== undefined) state.applied = applied;
+  return undefined;
 }
 
 // Context

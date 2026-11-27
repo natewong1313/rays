@@ -6,7 +6,6 @@ import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
 import gleam/list
 import gleam/result
-import integration_tests/notes/migrations
 import rays/durable_object.{type DurableObject, type Params}
 import rays/durable_object/sql
 
@@ -14,7 +13,7 @@ import rays/durable_object/sql
 pub fn notes() -> DurableObject(Nil) {
   durable_object.new(Nil)
   |> durable_object.on_wake(fn(wake) {
-    let assert Ok(_) = sql.migrate(wake.context, migrations.all)
+    let assert Ok(_) = sql.apply_migrations(wake.context)
     Nil
   })
   |> durable_object.bind(add)

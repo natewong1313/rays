@@ -34,6 +34,7 @@ export function makeWorker(fetch: ExportedHandlerFetchHandler<Env>): Worker {
   return {
     async fetch(request, env, ctx) {
       useTracing(ctx.tracing);
+      useEnv(env);
       const span = activeSpan();
       try {
         return await fetch(request, env, ctx);
@@ -44,6 +45,22 @@ export function makeWorker(fetch: ExportedHandlerFetchHandler<Env>): Worker {
     },
     [WORKER_BRAND]: true,
   };
+}
+
+// The Worker's env, for code that reaches the app's resources without being
+// passed it, as `rays/app` does. The runtime gives every request, RPC call
+// and Durable Object of a Worker the same env, so the one seen last is the
+// Worker's own. It is set where rays first sees it: each request here, each
+// RPC call in `rays/worker_rpc`, and each Durable Object as it wakes and is
+// called. Kept on `globalThis` for the same reason as the RPC registry.
+const ENV = Symbol.for("rays.env");
+
+export function useEnv(env: Env): void {
+  (globalThis as unknown as Record<symbol, Env>)[ENV] = env;
+}
+
+export function currentEnv(): Env | undefined {
+  return (globalThis as unknown as Record<symbol, Env | undefined>)[ENV];
 }
 
 // The bytes of an aligned bit array, without copying.

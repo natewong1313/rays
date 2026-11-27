@@ -1,8 +1,9 @@
-import { evictDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
-const get = (path: string) => exports.default.fetch(`https://example.com${path}`);
+const get = (path: string) =>
+  exports.default.fetch(`https://example.com${path}`);
 const post = (path: string, body: string) =>
   exports.default.fetch(`https://example.com${path}`, { method: "POST", body });
 const text = async (response: Promise<Response>) => (await response).text();
@@ -16,11 +17,28 @@ describe("a chat room", () => {
 
   it("keeps its messages in its database when it is evicted", async () => {
     await post("/rooms/kept", "before");
-    const room = (exports as unknown as Record<string, DurableObjectNamespace>)
-      .ChatRoom!.getByName("kept");
+    const room = (
+      exports as unknown as Record<string, DurableObjectNamespace>
+    ).ChatRoom!.getByName("kept");
     await evictDurableObject(room);
     expect(await text(post("/rooms/kept", "after"))).toBe("2");
     expect(await text(get("/rooms/kept"))).toBe("after\nbefore");
+  });
+
+  it("refuses an empty message before it touches its database", async () => {
+    expect((await post("/rooms/quiet", "  ")).status).toBe(400);
+    const room = (
+      exports as unknown as Record<string, DurableObjectNamespace>
+    ).ChatRoom!.getByName("quiet");
+    // The room never applied its migrations, so it has no tables at all.
+    const tables = await runInDurableObject(room, (_, state) =>
+      state.storage.sql
+        .exec(
+          "select name from sqlite_master where type = 'table' and name not like '_cf_%'",
+        )
+        .toArray(),
+    );
+    expect(tables).toEqual([]);
   });
 
   it("is one instance per name", async () => {

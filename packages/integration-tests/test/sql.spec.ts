@@ -51,7 +51,7 @@ describe("the Notes class", () => {
 describe("queries", () => {
   it("binds and decodes each kind of value", async () => {
     expect(await inside("values", sqlCheck.round_trip)).toBe(
-      'Ok([#(-7, 1.5, "héllo \\"there\\"", <<1, 2, 255>>, <<16>>, True, False, None, Some(3))])',
+      'Ok([#(-7, 1.5, "héllo \\"there\\"", <<1, 2, 255>>, <<16>>, True, False, None, Some(3), <<188>>)])',
     );
   });
 

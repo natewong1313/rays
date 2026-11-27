@@ -34,7 +34,7 @@ import type { BitArray, List, Result } from "../gleam.mjs";
 import Dict from "../../gleam_stdlib/dict.mjs";
 // @ts-ignore
 import * as gleamDict from "../../gleam_stdlib/gleam/dict.mjs";
-import { describeError } from "./worker_ffi.mts";
+import { currentEnv, describeError, useEnv } from "./worker_ffi.mts";
 import type { Env, Worker } from "./worker_ffi.mts";
 
 // Entry modules with RPC methods hand the runtime's tracing API to
@@ -352,6 +352,7 @@ export function serve(
   env: Env,
   ctx: ExecutionContext,
 ): Promise<Reply> {
+  useEnv(env);
   return serveMethods(worker[METHODS] ?? [], name, call, (handler, args) =>
     handler(args, env, ctx),
   );
@@ -417,7 +418,18 @@ const SIMULATED = Symbol.for("rays.rpc.simulated");
 
 type Simulated = { worker: RpcWorker; env: Env; ctx: ExecutionContext };
 
-export type Service = Record<string, unknown> & { [SIMULATED]?: Simulated };
+// A service found by its binding name only when it is called, in the
+// Worker's env, as `rays/app` makes one.
+const BINDING = Symbol.for("rays.rpc.binding");
+
+export type Service = Record<string, unknown> & {
+  [SIMULATED]?: Simulated;
+  [BINDING]?: string;
+};
+
+export function boundService(binding: string): Service {
+  return { [BINDING]: binding };
+}
 
 export function simulatedService(
   worker: RpcWorker,
@@ -429,11 +441,17 @@ export function simulatedService(
 
 export function service(env: Env, name: string): Result<Service, undefined> {
   const value = env[name];
-  // Service bindings and Durable Object stubs are proxies; some are callable.
-  return (typeof value === "object" || typeof value === "function") &&
-    value !== null
+  return isService(value)
     ? Result$Ok(value as Service)
     : Result$Error(undefined);
+}
+
+// Service bindings and Durable Object stubs are proxies; some are callable.
+function isService(value: unknown): value is Service {
+  return (
+    (typeof value === "object" || typeof value === "function") &&
+    value !== null
+  );
 }
 
 // What went wrong, as `#(kind, method, message)`, for `rays/worker_rpc` to
@@ -446,6 +464,7 @@ export type FailureKind =
   | "handler"
   | "encode"
   | "decode"
+  | "not_configured"
   | "send";
 
 export type Failure<Kind extends string = FailureKind> = [Kind, string, string];
@@ -468,6 +487,15 @@ export async function callWith<Kind extends string>(
   sendFailure: (error: unknown) => Kind | "send",
 ): Promise<Result<unknown, Failure<Kind | FailureKind>>> {
   // Own properties only: an RPC stub is a proxy that has every property.
+  if (Object.prototype.hasOwnProperty.call(service, BINDING)) {
+    const binding = service[BINDING]!;
+    const found = currentEnv()?.[binding];
+    if (!isService(found)) {
+      const name = registry().methods.get(method)?.name ?? method.name;
+      return Result$Error(["not_configured", name, binding]);
+    }
+    service = found;
+  }
   if (Object.prototype.hasOwnProperty.call(service, SIMULATED)) {
     return callSimulated(service[SIMULATED]!, method, args);
   }

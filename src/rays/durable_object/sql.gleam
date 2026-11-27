@@ -8,12 +8,12 @@
 //// rather than a request: every function here but `delete_all` is
 //// synchronous, and returns a `Result` rather than a `Promise`.
 ////
-//// A class creates its tables with migrations, which `migrate` runs when an
-//// instance wakes, and its methods query them with `query`:
+//// A class creates its tables with migrations, which `apply_migrations`
+//// runs, here when an instance wakes, and its methods query them with
+//// `query`:
 ////
 //// ```gleam
-//// // src/app/notes.gleam
-//// import app/notes/migrations
+//// // src/app/notes.gleam, with its migrations in src/app/notes/migrations/
 //// import gleam/dynamic/decode
 //// import gleam/javascript/promise.{type Promise}
 //// import gleam/list
@@ -24,7 +24,7 @@
 //// pub fn notes() -> DurableObject(Nil) {
 ////   durable_object.new(Nil)
 ////   |> durable_object.on_wake(fn(wake) {
-////     let assert Ok(_) = sql.migrate(wake.context, migrations.all)
+////     let assert Ok(_) = sql.apply_migrations(wake.context)
 ////     Nil
 ////   })
 ////   |> durable_object.bind(add)
@@ -60,24 +60,29 @@
 ////
 //// ## Migrations
 ////
-//// A migration is a script of SQL statements with a name. `migrate` runs
-//// the ones an instance hasn't run yet, in order, and records each one in
-//// the table `_rays_migrations` in the same transaction, so a migration
-//// that fails leaves nothing behind and runs again the next time.
+//// A class's migrations are the `.sql` files in the `migrations` directory
+//// beside the module that defines it, such as
+//// `src/app/notes/migrations/0001_create_notes.sql` for a class in
+//// `src/app/notes.gleam`. Each is named after its file, without `.sql`, and
+//// they run in the order of their names. When rays builds the project, with
+//// `rays build`, the `rays()` Vite plugin, or the configuration in
+//// `@rays/config`, it hands them to the class, so there is no module to
+//// import and nothing is generated. A module with migrations can define
+//// only one class, so it's clear which class they belong to.
 ////
-//// Migrations usually live in `.sql` files in a directory named
-//// `migrations`, such as `src/app/notes/migrations/0001_create_notes.sql`.
-//// When rays builds the project, with `rays build`, the `rays()` Vite
-//// plugin, or the configuration in `@rays/config`, it writes them into the
-//// Gleam module beside that directory, `src/app/notes/migrations.gleam`,
-//// whose constant `all` lists them in the order of their file names. That
-//// module is generated, so keep it in version control, but change the
-//// `.sql` files rather than it.
+//// `apply_migrations` runs the ones an instance hasn't run yet, and
+//// records each one in the table `_rays_migrations` in the same
+//// transaction, so a migration that fails leaves nothing behind and runs
+//// again the next time. Don't rename a migration that has been deployed:
+//// its name is what records that it ran.
 ////
-//// Instances wake one at a time, and the synchronous work of `on_wake` is
-//// done before any call is delivered, so running `migrate` there means every
-//// call sees the tables it expects. Each instance migrates its own database
-//// the first time it wakes after a deploy.
+//// The class decides when they run. In `on_wake`, they run before any call
+//// is delivered, since instances wake one at a time and the synchronous
+//// work of `on_wake` is done first, so every call sees the tables it
+//// expects. In a method, they can wait until checks that don't need the
+//// database have passed, so a call that fails them never writes to the
+//// instance's storage. Either way, each instance migrates its own database
+//// the first time it needs to after a deploy.
 ////
 //// ## Values
 ////
@@ -97,11 +102,14 @@
 ////
 //// Integers are JavaScript numbers, so those beyond 2^53 lose precision.
 
+import gleam/bit_array
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode.{type Decoder}
+import gleam/javascript/array.{type Array}
 import gleam/javascript/promise.{type Promise}
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/regexp.{Match}
 import gleam/result
 import gleam/set.{type Set}
 import rays/durable_object.{type Context}
@@ -137,14 +145,21 @@ pub fn text(value: String) -> Value {
 /// A blob of the bit array's bytes. A bit array that isn't a whole number of
 /// bytes is padded with zero bits to the end of its last byte.
 ///
-@external(javascript, "./sql_ffi.mts", "blob")
-pub fn blob(value: BitArray) -> Value
+pub fn blob(value: BitArray) -> Value {
+  let padding = { 8 - bit_array.bit_size(value) % 8 } % 8
+  // Concatenation realigns slices that start partway through a byte.
+  blob_bytes(<<value:bits, 0:size(padding)>>)
+}
 
 /// A bool, as SQLite stores one: the integer 1 for `True`, and 0 for
 /// `False`. Decode it with `decode_bool`.
 ///
-@external(javascript, "./sql_ffi.mts", "bool")
-pub fn bool(value: Bool) -> Value
+pub fn bool(value: Bool) -> Value {
+  case value {
+    True -> int(1)
+    False -> int(0)
+  }
+}
 
 /// Null.
 ///
@@ -178,35 +193,11 @@ pub fn decode_bool() -> Decoder(Bool) {
 // Statements
 //
 
-/// An error that can occur when running SQL.
-///
-pub type QueryError {
-  /// The statement couldn't run, such as because of a syntax error, a table
-  /// that doesn't exist, or a constraint it would break. The code is
-  /// SQLite's, as specific as SQLite gives it, such as
-  /// `"SQLITE_CONSTRAINT_UNIQUE"`, or `None` when the runtime refused the
-  /// statement before SQLite ran it, such as for having the wrong number of
-  /// values.
-  QueryFailed(code: Option(String), message: String)
-  /// The statement ran, but a row didn't match the decoder. Its changes are
-  /// kept, unless it ran in a `transaction` that then returns this error.
-  RowsNotDecoded(errors: List(decode.DecodeError))
-}
-
-/// Run SQL for its changes, with the given values bound to its `?`
-/// placeholders, in order, and ignore any rows it returns.
-///
-/// It can be a script of several statements separated by semicolons, such
-/// as one that creates tables, in which case the values are bound to the
-/// last statement. A script with no statements does nothing.
+/// Runs the given SQL and ignore any returned rows.
+/// This binds given values to `?` placeholders.
 ///
 /// To keep a script's changes only if all of its statements succeed, run
 /// it in a `transaction` that returns its error.
-///
-/// SQL's own transaction statements, such as `begin`, fail: use
-/// `transaction` instead.
-///
-/// # Examples
 ///
 /// ```gleam
 /// sql.exec(
@@ -224,23 +215,21 @@ pub type QueryError {
 ///   with: [],
 /// )
 /// ```
-///
 pub fn exec(
   sql: String,
   on context: Context,
   with values: List(Value),
 ) -> Result(Nil, QueryError) {
-  js_exec(context, sql, values) |> result.map_error(query_failed)
+  js_exec(context, sql, array.from_list(values))
+  |> result.map_error(error_msg_to_query_error)
 }
 
-/// Run one SQL statement with the given values bound to its `?`
-/// placeholders, in order, and decode each row it returns.
+/// Runs the given SQL and decodes each returned row.
+/// This binds given values to `?` placeholders.
 ///
 /// A row is decoded by position: `decode.field(0, ..)` is its first column.
 /// For a statement whose rows aren't needed, such as an `insert` without
 /// `returning`, use `exec`.
-///
-/// # Examples
 ///
 /// ```gleam
 /// sql.query(
@@ -262,30 +251,41 @@ pub fn query(
   expecting decoder: Decoder(a),
 ) -> Result(List(a), QueryError) {
   use rows <- result.try(
-    js_query(context, sql, values) |> result.map_error(query_failed),
+    js_query(context, sql, array.from_list(values))
+    |> result.map_error(error_msg_to_query_error),
   )
-  list.try_map(rows, decode.run(_, decoder))
+  list.try_map(array.to_list(rows), decode.run(_, decoder))
   |> result.map_error(RowsNotDecoded)
 }
 
-/// Runs a function within a transaction on the instance's database.
-///
-/// If the function returns an `Ok` then the transaction is committed, and
-/// its value is returned.
-///
+/// Opens up a transaction on the instance's database.
+/// Transactions are committed when the callback function returns an `Ok`.
 /// If the function returns an `Error` or panics then the transaction is
 /// rolled back, and the error is returned or the panic carries on.
 ///
-/// The function queries with the same `Context` as the code around it: the
-/// database has one connection, so every statement run while the function
-/// runs is in the transaction. The function is synchronous, so nothing else
-/// runs during it. A transaction can run inside another: if the inner one
-/// is rolled back, the outer one keeps its own changes.
+/// You should not do work inside the transaction beside sql exec/query.
 ///
-/// # Examples
+/// ```gleam
+/// let moved = sql.transaction(params.context, fn() {
+///   let debit = sql.exec(
+///     "update accounts set balance = balance - ? where id = ?",
+///     on: params.context,
+///     with: [sql.int(amount), sql.int(from)],
+///   )
+///   case debit {
+///     Error(e) -> Error(e)
+///     Ok(Nil) -> {
+///       sql.exec(
+///         "update accounts set balance = balance + ? where id = ?",
+///         on: params.context,
+///         with: [sql.int(amount), sql.int(to)],
+///       )
+///     }
+///   }
+/// })
+/// ```
 ///
-/// With `use`, the transaction is the rest of the block, so put it in a
-/// block of its own to do more after it ends:
+/// You can also use `use` to make the transaction the rest of the block.
 ///
 /// ```gleam
 /// let moved = {
@@ -309,79 +309,121 @@ pub fn transaction(
   callback: fn() -> Result(a, e),
 ) -> Result(a, e)
 
-/// Delete everything in the instance's database, all at once: its tables,
-/// their rows, and the record of which migrations have run. Once an
-/// instance's storage is empty and it shuts down, it stops existing, and
-/// isn't billed for storage. Dropping its tables isn't enough for that, as
-/// the database keeps some metadata until it is deleted with this.
+/// Delete everything in the instance's database, all at once.
 ///
-/// It also deletes the instance's alarm, for a Worker whose compatibility
-/// date is 2026-02-24 or later.
+/// Once an instance's storage is empty and it shuts down, it stops existing and will
+/// stop billing for storage. It also deletes the instance's alarm(s).
 ///
-/// The instance keeps running, and `on_wake` doesn't run again until it is
-/// next woken, so run `migrate` again afterwards if its methods will still
-/// query its tables.
+/// You should re-run migrations if you intend to re use the DO after calling delete_all.
+/// The next `apply_migrations` runs all of them again.
 ///
-/// # Examples
-///
-/// ```gleam
-/// pub fn close(params: Params(Nil, Nil)) -> Promise(Nil) {
-///   sql.delete_all(params.context)
-/// }
-/// ```
-///
+pub fn delete_all(context: Context) -> Promise(Nil) {
+  use Nil <- promise.map(js_delete_all(context))
+  js_set_migrations_applied(context, False)
+}
+
 @external(javascript, "./sql_ffi.mts", "delete_all")
-pub fn delete_all(context: Context) -> Promise(Nil)
+fn js_delete_all(context: Context) -> Promise(Nil)
 
 //
 // Migrations
 //
 
-/// A script of SQL statements that changes the database's schema, such as
-/// by creating a table. Its name identifies it in the database once it has
-/// run, so don't rename a migration that has been deployed.
+/// A script of SQL statements that changes the database's schema, from a
+/// `.sql` file in the class's `migrations` directory, named after the file
+/// without `.sql`. For rays's own tests: classes get theirs from the build.
 ///
-/// The modules rays generates from `.sql` files name each migration after
-/// its file, without `.sql`.
-///
+@internal
 pub type Migration {
   Migration(name: String, sql: String)
 }
 
-/// An error that can occur when running migrations.
+/// An error that can occur when applying migrations.
 ///
 pub type MigrationError {
-  /// The table recording which migrations have run, `_rays_migrations`,
-  /// couldn't be created or read.
+  /// The instance's class has no migrations: there are no `.sql` files in
+  /// the `migrations` directory beside the module that defines it, or the
+  /// instance wasn't started by a rays build, as under `gleam test`.
+  MigrationsNotFound
+  /// The table that stores migrations wasn't able to be created or read.
   HistoryNotRead(reason: QueryError)
   /// A migration failed, so none of its changes were kept. The migrations
   /// before it were run and recorded, and the ones after it weren't run.
   MigrationFailed(name: String, reason: QueryError)
 }
 
-/// Run each migration that hasn't run on this instance's database, in the
-/// order of the list, and return the names of those it ran.
+/// Apply the migrations of the instance's class that haven't run on its
+/// database yet, in the order of their file names, and return the names of
+/// those it ran.
 ///
-/// Each one runs in a transaction with recording it, so it either runs and
-/// is recorded, or leaves nothing behind. Migrations that were recorded
-/// before are skipped, even if their SQL has since changed, as are
-/// migrations recorded under names that are no longer in the list.
+/// A class's migrations are the `.sql` files in the `migrations` directory
+/// beside the module that defines it: `src/app/notes/migrations/` for a
+/// class in `src/app/notes.gleam`. The build hands them to the class, so
+/// there is nothing to import.
 ///
-/// Call it from `on_wake`, so that every call sees the tables it expects.
-/// A panic there stops the instance waking, so the call that woke it fails,
-/// and the next call tries again.
-///
-/// # Examples
+/// Call it wherever the instance first needs its tables. In `on_wake`, it
+/// runs before any call:
 ///
 /// ```gleam
 /// durable_object.new(Nil)
 /// |> durable_object.on_wake(fn(wake) {
-///   let assert Ok(_) = sql.migrate(wake.context, migrations.all)
+///   let assert Ok(_) = sql.apply_migrations(wake.context)
 ///   Nil
 /// })
 /// ```
 ///
-pub fn migrate(
+/// Or in a method, after checks that don't need the database, so a call
+/// that fails them, such as one from a spammer, never writes the instance's
+/// storage, and leaves no stored instance behind:
+///
+/// ```gleam
+/// pub fn add(params: Params(String, Nil)) -> Promise(Result(Int, AddError)) {
+///   use body <- result.try(validate(params.args))
+///   use _ <- result.try(
+///     sql.apply_migrations(params.context) |> result.map_error(StorageFailed),
+///   )
+///   // ...
+/// }
+/// ```
+///
+/// It's cheap to call on every call: once the migrations have been applied,
+/// later calls return `Ok([])` without reading the database, until the
+/// instance is evicted, or `delete_all` empties it.
+///
+pub fn apply_migrations(
+  context: Context,
+) -> Result(List(String), MigrationError) {
+  case js_class_migrations(context) {
+    Error(Nil) -> Error(MigrationsNotFound)
+    Ok(#(True, _)) -> Ok([])
+    Ok(#(False, migrations)) -> {
+      let migrations =
+        list.map(migrations, fn(migration) {
+          let #(name, sql) = migration
+          Migration(name:, sql:)
+        })
+      use ran <- result.map(run_migrations(context, migrations))
+      js_set_migrations_applied(context, True)
+      ran
+    }
+  }
+}
+
+@external(javascript, "../durable_object_ffi.mts", "classMigrations")
+fn js_class_migrations(
+  context: Context,
+) -> Result(#(Bool, List(#(String, String))), Nil)
+
+@external(javascript, "../durable_object_ffi.mts", "setMigrationsApplied")
+fn js_set_migrations_applied(context: Context, applied: Bool) -> Nil
+
+/// Run each migration that hasn't run on this instance's database, in the
+/// order of the list, and return the names of those it ran. For rays's own
+/// tests, which need migrations of their own: classes use
+/// `apply_migrations`.
+///
+@internal
+pub fn run_migrations(
   context: Context,
   migrations: List(Migration),
 ) -> Result(List(String), MigrationError) {
@@ -448,17 +490,46 @@ fn run_migration(
 // Errors
 //
 
-/// Turn the runtime's message for a statement that failed into a
-/// `QueryFailed`. SQLite's own messages end with its result code, as in
-/// `"no such table: notes: SQLITE_ERROR"`, and an extended code when it has
-/// one, as in `"...: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)"`.
-/// The runtime's own have no code.
+/// An error that can occur when running SQL.
 ///
+pub type QueryError {
+  /// The query couldn't run because of
+  /// - a syntax error
+  /// - a table that doesn't exist
+  /// - a constraint that would be broken
+  /// The code field is derived from SQLite, e.g. SQLITE_CONSTRAINT_UNIQUE.
+  QueryFailed(code: Option(String), message: String)
+  /// The statement ran, but a row didn't match the decoder. 
+  /// Changes are kept unless this query was ran in a `transaction`, then this
+  /// error would be returned and the transaction is rolled back.
+  RowsNotDecoded(errors: List(decode.DecodeError))
+}
+
 @internal
-pub fn query_failed(message: String) -> QueryError {
+pub fn error_msg_to_query_error(message: String) -> QueryError {
   case split_code(message) {
-    Ok(#(message, code)) -> QueryFailed(code: Some(code), message:)
-    Error(Nil) -> QueryFailed(code: None, message:)
+    Some(#(message, code)) -> QueryFailed(code: Some(code), message:)
+    None -> QueryFailed(code: None, message:)
+  }
+}
+
+// Given an error message from sqlite, parse out the message and code.
+// Sqlite will give error messages in the format "message: SQLITE_CODE_THING"
+
+const sqlite_error_code =
+  "^([\\s\\S]*): (SQLITE_[A-Z0-9_]+)(?: \\(extended: (SQLITE_[A-Z0-9_]+)\\))?$"
+
+fn split_code(message: String) -> Option(#(String, String)) {
+  use pattern <- option.then(
+    regexp.from_string(sqlite_error_code) |> option.from_result,
+  )
+  // An unmatched trailing group is omitted from the capture list.
+  case regexp.scan(pattern, message) {
+    [Match(submatches: [text, Some(_), Some(extended)], ..)] ->
+      Some(#(option.unwrap(text, ""), extended))
+    [Match(submatches: [text, Some(primary)], ..)] ->
+      Some(#(option.unwrap(text, ""), primary))
+    _ -> None
   }
 }
 
@@ -469,22 +540,19 @@ pub fn query_failed(message: String) -> QueryError {
 @external(javascript, "./sql_ffi.mts", "identity")
 fn to_value(value: a) -> Value
 
+@external(javascript, "./sql_ffi.mts", "blob")
+fn blob_bytes(value: BitArray) -> Value
+
 @external(javascript, "./sql_ffi.mts", "exec")
 fn js_exec(
   context: Context,
   sql: String,
-  values: List(Value),
+  values: Array(Value),
 ) -> Result(Nil, String)
 
 @external(javascript, "./sql_ffi.mts", "query")
 fn js_query(
   context: Context,
   sql: String,
-  values: List(Value),
-) -> Result(List(Dynamic), String)
-
-/// The message without the code at its end, and the code: the extended one
-/// if there is one.
-///
-@external(javascript, "./sql_ffi.mts", "split_code")
-fn split_code(message: String) -> Result(#(String, String), Nil)
+  values: Array(Value),
+) -> Result(Array(Dynamic), String)

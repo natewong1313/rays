@@ -3,8 +3,12 @@
 
 import gleam/javascript/promise.{type Promise}
 import gleam/option.{type Option, Some}
+import rays/app
 import rays/worker.{type Context, type Env, type Request, type Response}
 import rays/worker_rpc
+
+/// The names Worker, for the app to register and other Workers to reach.
+pub const worker = app.Worker("names", entrypoint: main)
 
 pub fn main() -> worker.Worker {
   worker.new(handle_request)

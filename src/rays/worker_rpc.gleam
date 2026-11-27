@@ -189,6 +189,10 @@ pub type CallError {
   /// A value that was sent couldn't be decoded, usually because the two
   /// Workers were built from different code.
   DecodeFailed(method: String, message: String)
+  /// The Worker has no binding for a Worker reached with `rays/app`'s
+  /// `connect_worker`, as when its configuration doesn't come from `raysApp()`, or a test
+  /// didn't set up the app with `app.simulate`.
+  NotConfigured(method: String, binding: String)
 }
 
 /// Call a method on another Worker.
@@ -233,6 +237,7 @@ pub fn failure_to_call_error(failure: #(String, String, String)) -> CallError {
     "handler" -> HandlerFailed(method:, message:)
     "encode" -> EncodeFailed(method:, message:)
     "decode" -> DecodeFailed(method:, message:)
+    "not_configured" -> NotConfigured(method:, binding: message)
     _ -> SendFailed(method:, message:)
   }
 }

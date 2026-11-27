@@ -23,6 +23,7 @@ import {
   findDurableObjectClasses,
   type DurableObjectClass,
 } from "../durable-object.ts";
+import { findMigrations, type Migration } from "../migrations.ts";
 import type { ModuleInterface } from "../package-interface.ts";
 import { writeFooters } from "./footers.ts";
 import { findMethods } from "./methods.ts";
@@ -45,6 +46,11 @@ export interface BuiltDurableObjectClass extends DurableObjectClass {
    * class: the entry module imports it, then finds the class by name.
    */
   compiled: string;
+  /**
+   * The class's SQL migrations, from the `migrations` directory beside its
+   * module, in order, or `undefined` if it has none.
+   */
+  migrations: Migration[] | undefined;
 }
 
 /** A project's Durable Object classes, which every entry module exports. */
@@ -91,6 +97,7 @@ export async function buildRpc(options: {
     path.join(context.javascript, "rays", "rays", `${module}_ffi.mts`);
   const methods = await findMethods(context);
   const classes = findDurableObjectClasses(options.modules);
+  const migrations = findMigrations(options.root, classes);
   await writeFooters(context, { methods, classes }, ffi("worker_rpc"));
 
   const ofKind = (kind: RpcMethod["kind"]) =>
@@ -112,6 +119,7 @@ export async function buildRpc(options: {
                 context.packageName,
                 `${object.module}.mjs`,
               ),
+              migrations: migrations.get(object.className),
             })),
             methods: ofKind("durable_object"),
             ffi: ffi("durable_object"),

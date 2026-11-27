@@ -198,6 +198,10 @@ function objectsSource(
       const definition = `$rays_definition_${object.className}`;
       const declared = `$rays_class_${object.className}`;
       const source = `${object.function} in src/${object.module}.gleam`;
+      const migrations =
+        object.migrations === undefined
+          ? ""
+          : `, ${JSON.stringify(object.migrations)}`;
       const served = methodsSource(
         objects.methods,
         typescript,
@@ -206,8 +210,9 @@ function objectsSource(
       );
       return `
 // Fails if the function doesn't return a DurableObject, or a bound method
-// isn't one rays found, so the Worker doesn't start.
-const ${definition} = $rays_check(${name}, ${JSON.stringify(source)});
+// isn't one rays found, so the Worker doesn't start. The class's migrations,
+// from its module's migrations directory, follow, for sql.apply_migrations.
+const ${definition} = $rays_check(${name}, ${JSON.stringify(source)}${migrations});
 
 class ${declared} extends $rays_DurableObject {
   #memory${any};

@@ -14,7 +14,6 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { entrySource } from "./build/entry.ts";
 import { relativeSpecifier, writeIfChanged } from "./build/files.ts";
-import { writeMigrationModules } from "./build/migrations.ts";
 import {
   gleamBinary,
   readInterface,
@@ -108,17 +107,12 @@ export interface Project {
  * Compile the Gleam project to JavaScript, and read the types of its modules
  * so that its Worker modules can be checked.
  *
- * First it writes the Gleam module beside each `migrations` directory under
- * `src/` that holds `.sql` files, such as `src/app/notes/migrations.gleam`,
- * for `rays/durable_object/sql`.
- *
  * @throws {BuildError} If the project is not usable or fails to compile.
  */
 export async function compile(options: CompileOptions): Promise<Project> {
   const root = path.resolve(options.root);
   const packageName = await readPackageName(root);
   const gleam = gleamBinary(options.gleam);
-  writeMigrationModules(root, gleam);
   await runGleam(gleam, root, ["build", "--target", "javascript"], {
     output: options.output ?? "inherit",
   });

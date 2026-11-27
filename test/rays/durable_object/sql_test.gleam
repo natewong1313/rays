@@ -25,6 +25,11 @@ pub fn query_failed_with_primary_code_test() {
     )
 }
 
+pub fn query_failed_with_empty_message_test() {
+  assert sql.query_failed(": SQLITE_ERROR")
+    == QueryFailed(code: Some("SQLITE_ERROR"), message: "")
+}
+
 pub fn query_failed_without_code_test() {
   assert sql.query_failed("Wrong number of parameter bindings for SQL query.")
     == QueryFailed(

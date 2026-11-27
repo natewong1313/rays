@@ -1,4 +1,5 @@
-// Tests which entry modules hand the runtime's tracing API to `rays/trace`.
+// Tests which entry modules hand the runtime's tracing API to `rays/trace`,
+// and how they hand Durable Object classes their migrations.
 
 import { describe, expect, it } from "vitest";
 import { entrySource, type EntryOptions } from "./entry.ts";
@@ -24,6 +25,7 @@ const durableObjects: DurableObjects = {
       function: "room",
       className: "Room",
       compiled: "/build/app/app/room.mjs",
+      migrations: undefined,
     },
   ],
   methods: [],
@@ -84,5 +86,32 @@ describe("entrySource", () => {
       rpc,
     });
     expect(source).toContain(`// @ts-ignore\n${handOff}`);
+  });
+
+  it("hands a class its migrations, as written", () => {
+    const migrations = [
+      { name: "0001_create", sql: 'create table t (a text default "\\");\n' },
+    ];
+    const source = entrySource("app", "/build/app/app.mjs", {
+      ...options,
+      durableObjects: {
+        ...durableObjects,
+        classes: [{ ...durableObjects.classes[0]!, migrations }],
+      },
+    });
+    const call = '$rays_check("Room", "room in src/app/room.gleam", ';
+    const start = source.indexOf(call) + call.length;
+    const end = source.indexOf(");\n", start);
+    expect(JSON.parse(source.slice(start, end))).toEqual(migrations);
+  });
+
+  it("passes no migrations to a class without any", () => {
+    const source = entrySource("app", "/build/app/app.mjs", {
+      ...options,
+      durableObjects,
+    });
+    expect(source).toContain(
+      '$rays_check("Room", "room in src/app/room.gleam");',
+    );
   });
 });

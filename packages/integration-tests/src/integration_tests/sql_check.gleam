@@ -7,14 +7,14 @@ import gleam/javascript/promise.{type Promise}
 import gleam/option.{Some}
 import gleam/result
 import gleam/string
-import integration_tests/notes/migrations
 import rays/durable_object.{type Context}
 import rays/durable_object/sql.{Migration}
 
 /// Bind one value of each kind, and decode them back.
 pub fn round_trip(context: Context) -> String {
+  let assert <<_:4, slice:bits>> = <<10:4, 188>>
   sql.query(
-    "select ?, ?, ?, ?, ?, ?, ?, ?, ?",
+    "select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?",
     on: context,
     with: [
       sql.int(-7),
@@ -26,6 +26,7 @@ pub fn round_trip(context: Context) -> String {
       sql.bool(False),
       sql.null(),
       sql.nullable(sql.int, Some(3)),
+      sql.blob(slice),
     ],
     expecting: {
       use int <- decode.field(0, decode.int)
@@ -37,7 +38,19 @@ pub fn round_trip(context: Context) -> String {
       use no <- decode.field(6, sql.decode_bool())
       use null <- decode.field(7, decode.optional(decode.int))
       use some <- decode.field(8, decode.optional(decode.int))
-      decode.success(#(int, float, text, blob, padded, yes, no, null, some))
+      use sliced <- decode.field(9, decode.bit_array)
+      decode.success(#(
+        int,
+        float,
+        text,
+        blob,
+        padded,
+        yes,
+        no,
+        null,
+        some,
+        sliced,
+      ))
     },
   )
   |> string.inspect
@@ -190,7 +203,7 @@ pub fn steps(context: Context) -> String {
 
 /// Run migrations whose second one fails partway, after creating a table.
 pub fn migrate_broken(context: Context) -> String {
-  sql.migrate(context, [
+  sql.run_migrations(context, [
     Migration(name: "0100_first", sql: "create table step_first (a)"),
     Migration(
       name: "0101_broken",
@@ -203,7 +216,7 @@ pub fn migrate_broken(context: Context) -> String {
 
 /// The same migrations, with the broken one fixed.
 pub fn migrate_fixed(context: Context) -> String {
-  sql.migrate(context, [
+  sql.run_migrations(context, [
     Migration(name: "0100_first", sql: "create table step_first (a)"),
     Migration(name: "0101_broken", sql: "create table step_half (a);"),
     Migration(name: "0102_after", sql: "create table step_after (a)"),
@@ -222,6 +235,6 @@ pub fn delete_and_migrate(context: Context) -> Promise(String) {
       with: [],
       expecting: decode.field(0, decode.string, decode.success),
     )
-  let migrated = sql.migrate(context, migrations.all)
+  let migrated = sql.apply_migrations(context)
   string.inspect(#(tables, migrated))
 }

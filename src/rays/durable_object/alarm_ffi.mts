@@ -1,23 +1,21 @@
-// FFI shim for `rays/durable_object`'s alarms: many named alarms on the one
-// alarm Cloudflare gives each instance.
+// FFI shim for durable object alarms.
+// Rays not only adds support for alarms but also builds out a bunch of functionality on top
+// that is invisible to users
+// - support for multiple named alarms
+// - idempotent invocations
 //
-// Every occurrence is a row of `rays_alarms`, in the instance's SQLite
-// database, keyed by the id its handler was registered with and its key. The instance's real
-// alarm is always set to the earliest time any row is due, by the same
-// synchronous code that changes the rows, so the two are stored together.
-// When it fires, the class's `alarm` method calls `runAlarms`, which runs
-// every due row, stores each one's outcome, and sets the alarm again.
+// Every alarm invocation (fake alarm) gets written as a row to `rays_alarms` in the DO's sqlite db.
+// Each alarm invocation is keyed by the id of its alarm handler and its own id.
 //
-// A row's `generation` is a new id each time the occurrence is scheduled.
-// It is what the handler's idempotency key is made from, and every write
-// that stores an attempt's outcome checks it, and the attempt number, so an
-// attempt that was replaced, cancelled or timed out can't change the row
-// that took its place.
+// To make the multi alarm system work, we set the DOs alarm to the earliest fake alarm due date.
+// When it fires, rays controls the alarm so it'll check what alarms are due, store the outcome, and
+// re arm each alarm.
 //
-// Each row keeps its own attempt count and backoff. The runner schedules
-// a recovery wake on failure and lets Cloudflare retry if that write fails.
+// Each alarm row has a `generation` column which gets changed everytime an occurence is scheduled. This is
+// what we use for the alarm handlers idempotency key. This prevents against attempts that get cancelled, time out,
+// or lag behind.
 
-import { Result$Error, Result$Ok } from "../../gleam.mjs";
+import { Result$Error as err, Result$Ok as ok } from "../../gleam.mjs";
 import type { Result } from "../../gleam.mjs";
 import { describeError, type Env } from "../worker_ffi.mts";
 
@@ -25,8 +23,9 @@ export type AlarmFunction = (alarm: unknown) => Promise<unknown>;
 
 // What the Gleam `register_alarm` wraps a handler in: it makes the `Alarm`
 // record, and turns the handler's `Outcome` into a pair.
-type Outcome = ["done" | "retry" | "give_up", string];
-type Run = (
+type AlarmRunOutcome = ["done" | "retry" | "give_up", string];
+
+type AlarmRun = (
   key: string,
   scheduledAt: number,
   attempt: number,
@@ -34,18 +33,20 @@ type Run = (
   env: Env,
   ctx: DurableObjectState,
   memory: unknown,
-) => Promise<Outcome>;
+) => Promise<AlarmRunOutcome>;
 
+// Built by the Gleam `register_alarm` as an `AlarmConfig` record, whose
+// fields keep their Gleam names.
 export interface AlarmConfig {
   // What its alarms are stored under.
-  readonly id: string;
-  readonly run: Run;
+  id: string;
+  run: AlarmRun;
   // The milliseconds to wait after the given attempt fails.
-  readonly delay: (attempt: number) => number;
-  readonly maxAttempts: number;
-  readonly timeout: number;
+  delay: (attempt: number) => number;
+  max_attempts: number;
+  timeout: number;
   // Why the arguments `register_alarm` was given can't be used, or "".
-  readonly problem: string;
+  problem: string;
 }
 
 // The part of a class definition alarms use. `durable_object_ffi.mts` keeps
@@ -57,15 +58,10 @@ interface WithAlarms {
 export function registerAlarm<D extends WithAlarms>(
   definition: D,
   handler: AlarmFunction,
-  id: string,
-  run: Run,
-  delay: (attempt: number) => number,
-  maxAttempts: number,
-  timeout: number,
-  problem: string,
+  config: AlarmConfig,
 ): D {
   const alarms = new Map(definition.alarms);
-  alarms.set(handler, { id, run, delay, maxAttempts, timeout, problem });
+  alarms.set(handler, config);
   return { ...definition, alarms };
 }
 
@@ -93,23 +89,24 @@ export function checkAlarms(definition: WithAlarms, className: string): void {
 // Gleam `Context`: scheduling finds the id its class registered the handler
 // with, and running a handler needs the instance's env and memory.
 
-interface Running {
-  readonly handler: string;
-  readonly key: string;
+// An alarm handler that is currently executing.
+interface RunningAlarmHandler {
+  handler: string;
+  key: string;
   // How long its handler was given: while it is still running after that,
   // its row is checked again this often.
-  readonly timeout: number;
+  timeout: number;
 }
 
 interface Instance {
-  readonly byHandler: ReadonlyMap<AlarmFunction, AlarmConfig>;
-  readonly byId: ReadonlyMap<string, AlarmConfig>;
-  readonly env: Env;
-  readonly memory: unknown;
+  byHandler: ReadonlyMap<AlarmFunction, AlarmConfig>;
+  byId: Map<string, AlarmConfig>;
+  env: Env;
+  memory: unknown;
   // The occurrences whose handlers are running, by `occurrence`. One stays
   // here until its handler settles, even after it timed out, so an
   // occurrence never has two attempts running at once.
-  readonly running: Map<string, Running>;
+  running: Map<string, RunningAlarmHandler>;
 }
 
 const instances = new WeakMap<DurableObjectState, Instance>();
@@ -131,8 +128,7 @@ export function rememberInstance(
   });
 }
 
-const occurrence = (handler: string, key: string) =>
-  JSON.stringify([handler, key]);
+const buildInvocationId = (handler: string, key: string) => JSON.stringify([handler, key]);
 
 // Storage
 
@@ -174,21 +170,15 @@ function createTable(sql: SqlStorage): void {
     reason text,
     primary key (handler, key)
   ) without rowid`);
-  sql.exec(
-    `create index if not exists ${TABLE}_due on ${TABLE} (status, next_attempt_at)`,
-  );
+  sql.exec(`create index if not exists ${TABLE}_due on ${TABLE} (status, next_attempt_at)`);
 }
 
 // Reads don't create the table, so an instance that never schedules an
 // alarm stores nothing.
 function hasTable(sql: SqlStorage): boolean {
   return (
-    sql
-      .exec(
-        "select 1 from sqlite_master where type = 'table' and name = ?",
-        TABLE,
-      )
-      .toArray().length > 0
+    sql.exec("select 1 from sqlite_master where type = 'table' and name = ?", TABLE).toArray()
+      .length > 0
   );
 }
 
@@ -213,7 +203,7 @@ function arm(ctx: DurableObjectState, instance: Instance | undefined): void {
   // In order of time, so the first row that isn't running is the earliest
   // that can run. Running rows before it may be due later than it.
   for (const row of pending) {
-    const running = instance?.running.get(occurrence(row.handler, row.key));
+    const running = instance?.running.get(buildInvocationId(row.handler, row.key));
     const at =
       running === undefined
         ? row.next_attempt_at
@@ -252,10 +242,7 @@ function registeredHere(
   const instance = instances.get(ctx);
   const config = instance?.byHandler.get(handler);
   if (instance === undefined || config === undefined) {
-    return Result$Error([
-      "not_registered",
-      handler.name || "an anonymous function",
-    ]);
+    return err(["not_registered", handler.name || "an anonymous function"]);
   }
   return { name: config.id, instance };
 }
@@ -307,9 +294,9 @@ export function schedule(
       );
       arm(ctx, instance);
     });
-    return Result$Ok(undefined);
+    return ok(undefined);
   } catch (error) {
-    return Result$Error(["storage", messageOf(error)]);
+    return err(["storage", messageOf(error)]);
   }
 }
 
@@ -322,22 +309,18 @@ export function cancel(
   if (!("name" in registered)) return registered;
   const { name, instance } = registered;
   try {
-    if (!hasTable(ctx.storage.sql)) return Result$Ok(false);
+    if (!hasTable(ctx.storage.sql)) return ok(false);
     const deleted = ctx.storage.transactionSync(() => {
       const removed =
         ctx.storage.sql
-          .exec(
-            `delete from ${TABLE} where handler = ? and key = ? returning key`,
-            name,
-            key,
-          )
+          .exec(`delete from ${TABLE} where handler = ? and key = ? returning key`, name, key)
           .toArray().length > 0;
       if (removed) arm(ctx, instance);
       return removed;
     });
-    return Result$Ok(deleted);
+    return ok(deleted);
   } catch (error) {
-    return Result$Error(["storage", messageOf(error)]);
+    return err(["storage", messageOf(error)]);
   }
 }
 
@@ -347,9 +330,9 @@ export function next(
   key: string,
 ): Result<number, undefined> {
   const name = instances.get(ctx)?.byHandler.get(handler)?.id;
-  if (name === undefined) return Result$Error(undefined);
+  if (name === undefined) return err(undefined);
   try {
-    if (!hasTable(ctx.storage.sql)) return Result$Error(undefined);
+    if (!hasTable(ctx.storage.sql)) return err(undefined);
     const [row] = ctx.storage.sql
       .exec<{ next_attempt_at: number }>(
         `select next_attempt_at from ${TABLE}
@@ -358,11 +341,9 @@ export function next(
         key,
       )
       .toArray();
-    return row === undefined
-      ? Result$Error(undefined)
-      : Result$Ok(row.next_attempt_at);
+    return row === undefined ? err(undefined) : ok(row.next_attempt_at);
   } catch {
-    return Result$Error(undefined);
+    return err(undefined);
   }
 }
 
@@ -384,9 +365,9 @@ export function next(
 // it times out, and the writes it makes later are stored on their own.
 
 interface Claim {
-  readonly row: Row;
-  readonly config: AlarmConfig;
-  readonly attempt: number;
+  row: Row;
+  config: AlarmConfig;
+  attempt: number;
 }
 
 export async function runAlarms(ctx: DurableObjectState): Promise<void> {
@@ -407,11 +388,11 @@ export async function runAlarms(ctx: DurableObjectState): Promise<void> {
       }
       const attempt = claim(sql, row, config, now);
       if (attempt === undefined) {
-        fail(
+        handleAlarmHandlerFailure(
           sql,
           row,
           row.attempt,
-          `every one of its ${config.maxAttempts} attempts was lost before it finished`,
+          `every one of its ${config.max_attempts} attempts was lost before it finished`,
         );
         continue;
       }
@@ -427,7 +408,7 @@ export async function runAlarms(ctx: DurableObjectState): Promise<void> {
     for (const claimed of claims) {
       // Cancelled or replaced while the claims were stored.
       if (!stillClaimed(sql, claimed)) continue;
-      start(ctx, instance!, claimed);
+      startAlarmHandler(ctx, instance!, claimed);
     }
     arm(ctx, instance);
   } catch (error) {
@@ -443,16 +424,9 @@ export async function runAlarms(ctx: DurableObjectState): Promise<void> {
 // The due rows whose handlers aren't running, at most `BATCH` of them. The
 // rows `arm` sets the alarm for are the same: a due row that is running
 // isn't, so the alarm never fires for rows it can't run.
-function runnable(
-  sql: SqlStorage,
-  instance: Instance | undefined,
-  now: number,
-): Row[] {
+function runnable(sql: SqlStorage, instance: Instance | undefined, now: number): Row[] {
   const running = JSON.stringify(
-    [...(instance?.running.values() ?? [])].map(({ handler, key }) => [
-      handler,
-      key,
-    ]),
+    [...(instance?.running.values() ?? [])].map(({ handler, key }) => [handler, key]),
   );
   return sql
     .exec<Row>(
@@ -476,12 +450,7 @@ function runnable(
 // instance count too, and a handler that crashes it every time stops.
 // Until the attempt stores its outcome, its row is due again only once its
 // timeout has passed, in case it is lost.
-function claim(
-  sql: SqlStorage,
-  row: Row,
-  config: AlarmConfig,
-  now: number,
-): number | undefined {
+function claim(sql: SqlStorage, row: Row, config: AlarmConfig, now: number): number | undefined {
   const [claimed] = sql
     .exec<{ attempt: number }>(
       `update ${TABLE} set attempt = attempt + 1, next_attempt_at = ?
@@ -492,7 +461,7 @@ function claim(
       row.handler,
       row.key,
       row.generation,
-      config.maxAttempts,
+      config.max_attempts,
     )
     .toArray();
   return claimed?.attempt;
@@ -532,31 +501,31 @@ function postponeUnregistered(sql: SqlStorage, row: Row, now: number): void {
   );
 }
 
-// Start the handler of a claimed attempt, and store its outcome when it
-// settles or times out. Nothing waits for it but the instance, through
-// `waitUntil`, so it catches its own failures.
-function start(
+// After claiming an alarm handler attempt, we start the handler. We then
+// store its outcome once finished or timed out.
+// A handler runs in the background using ctx.waitUntil
+function startAlarmHandler(
   ctx: DurableObjectState,
   instance: Instance,
   { row, config, attempt }: Claim,
 ): void {
-  const id = occurrence(row.handler, row.key);
-  const running: Running = {
+  const invocationId = buildInvocationId(row.handler, row.key);
+
+  const running: RunningAlarmHandler = {
     handler: row.handler,
     key: row.key,
     timeout: config.timeout,
   };
-  instance.running.set(id, running);
+  instance.running.set(invocationId, running);
 
-  let settle!: (outcome: Outcome) => void;
-  const settled = new Promise<Outcome>((resolve) => {
-    settle = resolve;
-  });
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    settle(["retry", `timed out after ${config.timeout}ms`]);
-  }, config.timeout);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<AlarmRunOutcome>((resolve) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      resolve(["retry", `timed out after ${config.timeout}ms`]);
+    }, config.timeout);
+  });
 
   const handled = Promise.resolve()
     .then(() =>
@@ -571,22 +540,22 @@ function start(
       ),
     )
     .then(
-      (outcome): Outcome => outcome,
-      (error): Outcome => ["retry", `panicked: ${messageOf(error)}`],
+      (outcome): AlarmRunOutcome => outcome,
+      (error): AlarmRunOutcome => ["retry", `panicked: ${messageOf(error)}`],
     );
 
   // The handler's own lifetime: it leaves `running` only once it settles,
   // even after it timed out, so the alarm never has two attempts at once.
-  const finished = handled.then((outcome) => {
+  const finished = handled.then(() => {
     clearTimeout(timer);
-    settle(outcome);
-    if (instance.running.get(id) === running) instance.running.delete(id);
+    if (instance.running.get(invocationId) === running) instance.running.delete(invocationId);
     // Its row was left alone while it ran on after its timeout.
     if (timedOut) arm(ctx, instance);
   });
 
-  const stored = settled.then(([kind, reason]) => {
-    storeOutcome(ctx.storage.sql, row, config, attempt, kind, reason);
+  // The first of the handler and its timeout decides what's stored.
+  const stored = Promise.race([handled, timeout]).then(([kind, reason]) => {
+    handleAlarmHandlerOutcome(ctx.storage.sql, row, config, attempt, kind, reason);
     arm(ctx, instance);
   });
 
@@ -603,42 +572,52 @@ function start(
   );
 }
 
-// Every write checks the row is still this attempt's, so one that was
-// replaced, cancelled, or timed out can't change the row that took its
-// place.
-function storeOutcome(
+// We make sure on a write to ensure the row still belongs to the current attempt.
+// This way, a replaced/cancelled/timed out attempt doesn't overwrite a new attempt.
+function handleAlarmHandlerOutcome(
   sql: SqlStorage,
   row: Row,
   config: AlarmConfig,
   attempt: number,
-  kind: Outcome[0],
+  outcome: AlarmRunOutcome[0],
   reason: string,
 ): void {
-  const guard = [row.handler, row.key, row.generation, attempt] as const;
-  const owns = "handler = ? and key = ? and generation = ? and attempt = ?";
-  switch (kind) {
+  switch (outcome) {
     case "done":
-      sql.exec(`delete from ${TABLE} where ${owns}`, ...guard);
+      sql.exec(
+        `delete from ${TABLE} where handler = ? and key = ? and generation = ? and attempt = ?`,
+        row.handler,
+        row.key,
+        row.generation,
+        attempt,
+      );
       return;
     case "give_up":
-      fail(sql, row, attempt, reason);
+      handleAlarmHandlerFailure(sql, row, attempt, reason);
       return;
     case "retry": {
-      if (attempt >= config.maxAttempts) {
-        fail(sql, row, attempt, reason);
+      if (attempt >= config.max_attempts) {
+        handleAlarmHandlerFailure(sql, row, attempt, reason);
         return;
       }
+
       const retried =
         sql
           .exec(
             `update ${TABLE} set next_attempt_at = ?, reason = ?
-             where ${owns} and status = 'pending' returning key`,
+             where handler = ? and key = ? and generation = ? and attempt = ? and status = 'pending' returning key`,
             Date.now() + Math.max(0, config.delay(attempt)),
             reason,
-            ...guard,
+            row.handler,
+            row.key,
+            row.generation,
+            attempt,
           )
           .toArray().length > 0;
-      if (!retried) return;
+      if (!retried) {
+        return;
+      }
+
       console.warn({
         message: "An alarm failed, and will be tried again",
         handler: row.handler,
@@ -651,7 +630,7 @@ function storeOutcome(
   }
 }
 
-function fail(
+function handleAlarmHandlerFailure(
   sql: SqlStorage,
   row: Row,
   attempt: number,

@@ -37,10 +37,12 @@ fn post_message(
   use message <- worker.require_string_body(request)
   let room = durable_object.get_by_name(rooms, name)
   use result <- promise.map(durable_object.call(room, chat_room.post, message))
-  // A 500 if the room couldn't query its database, a 502 if the call failed.
+  // A 400 for an empty message, a 500 if the room couldn't use its
+  // database, and a 502 if the call failed.
   case result {
     Ok(Ok(count)) -> worker.ok() |> worker.string_body(int.to_string(count))
-    Ok(Error(Nil)) -> worker.internal_server_error()
+    Ok(Error(chat_room.EmptyMessage)) -> worker.response(400)
+    Ok(Error(chat_room.StorageFailed)) -> worker.internal_server_error()
     Error(_) -> worker.response(502)
   }
 }

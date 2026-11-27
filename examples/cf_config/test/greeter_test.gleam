@@ -1,12 +1,15 @@
-//// Unit tests for both Workers, run with `gleam test`. The main Worker's
-//// `NAMES` binding is wired to the real names Worker, so these test the two
-//// together without the Workers runtime.
+//// Unit tests for both Workers, run with `gleam test`. The environment comes
+//// from the app, so the main Worker reaches the real names Worker the way it
+//// does when deployed, without the Workers runtime or any binding name.
 
 import gleam/http
 import gleam/javascript/promise.{type Promise}
+import gleam/list
 import gleeunit
 import greeter
+import greeter/front
 import greeter/names
+import rays/app
 import rays/worker.{type Response}
 import rays/worker/simulate
 
@@ -14,15 +17,11 @@ pub fn main() -> Nil {
   gleeunit.main()
 }
 
-/// An environment where `NAMES` is bound to the names Worker.
+/// Set up the app, so the main Worker reaches its other Workers, and give
+/// the main Worker an env of its own for anything else, such as GREETING.
 fn env() -> worker.Env {
+  app.simulate(greeter.app(), context: simulate.context())
   simulate.env()
-  |> simulate.with_rpc_service(
-    "NAMES",
-    simulate.context(),
-    names.main(),
-    simulate.env(),
-  )
 }
 
 fn send(
@@ -30,11 +29,11 @@ fn send(
   path: String,
   env: worker.Env,
 ) -> Promise(Response) {
-  greeter.handle_request(
-    simulate.request(method, path),
-    env,
-    simulate.context(),
-  )
+  front.handle_request(simulate.request(method, path), env, simulate.context())
+}
+
+pub fn app_is_valid_test() {
+  assert app.validate(greeter.app()) == Ok(Nil)
 }
 
 pub fn greets_the_named_visitor_test() {
@@ -49,7 +48,10 @@ pub fn uses_the_greeting_variable_test() {
   assert simulate.read_body(response) == "Howdy, Dr Joe!"
 }
 
-pub fn fails_without_the_names_binding_test() {
+pub fn fails_without_the_names_worker_test() {
+  // An app without the names Worker, so the main Worker has no binding to it.
+  app.new("solo", main: front.worker)
+  |> app.simulate(context: simulate.context())
   use response <- promise.map(send(http.Get, "/", simulate.env()))
   assert response.status == 500
 }
@@ -71,4 +73,13 @@ pub fn names_worker_test() {
     simulate.context(),
   ))
   assert response.status == 404
+}
+
+pub fn catches_mistakes_in_the_app_test() {
+  let assert Error(errors) =
+    app.new("Bad Name", main: front.worker)
+    |> app.register_worker(app.Worker("front", entrypoint: names.main))
+    |> app.validate
+  assert list.contains(errors, app.InvalidName("Bad Name"))
+  assert list.contains(errors, app.DuplicateWorker("front"))
 }

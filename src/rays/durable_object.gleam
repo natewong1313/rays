@@ -535,26 +535,45 @@ pub fn register_alarm(
   js_register_alarm(
     object,
     handler,
-    id,
-    fn(key, scheduled_at, attempt, idempotency_key, env, context, memory) {
-      Alarm(
-        key:,
-        scheduled_at: timestamp_from_milliseconds(scheduled_at),
-        attempt:,
-        idempotency_key:,
-        env:,
-        context:,
-        memory:,
-      )
-      |> handler
-      |> promise.map(outcome_to_pair)
-    },
-    fn(attempt) {
-      retry.delay(backoff, after: attempt) |> duration.to_milliseconds
-    },
-    max_attempts,
-    duration.to_milliseconds(timeout),
-    problem,
+    AlarmConfig(
+      id:,
+      run: fn(key, scheduled_at, attempt, idempotency_key, env, context, memory) {
+        Alarm(
+          key:,
+          scheduled_at: timestamp_from_milliseconds(scheduled_at),
+          attempt:,
+          idempotency_key:,
+          env:,
+          context:,
+          memory:,
+        )
+        |> handler
+        |> promise.map(outcome_to_pair)
+      },
+      delay: fn(attempt) {
+        retry.delay(backoff, after: attempt) |> duration.to_milliseconds
+      },
+      max_attempts:,
+      timeout: duration.to_milliseconds(timeout),
+      problem:,
+    ),
+  )
+}
+
+// What `alarm_ffi.mts` keeps for a registered handler. Its fields are read
+// there by name.
+type AlarmConfig(memory) {
+  AlarmConfig(
+    // What its alarms are stored under.
+    id: String,
+    run: fn(String, Int, Int, String, Env, Context, Memory(memory)) ->
+      Promise(#(String, String)),
+    // The milliseconds to wait after the given attempt fails.
+    delay: fn(Int) -> Int,
+    max_attempts: Int,
+    timeout: Int,
+    // Why the arguments `register_alarm` was given can't be used, or "".
+    problem: String,
   )
 }
 
@@ -964,13 +983,7 @@ fn js_bind(
 fn js_register_alarm(
   object: DurableObject(memory),
   handler: fn(Alarm(memory)) -> Promise(Outcome),
-  id: String,
-  run: fn(String, Int, Int, String, Env, Context, Memory(memory)) ->
-    Promise(#(String, String)),
-  delay: fn(Int) -> Int,
-  max_attempts: Int,
-  timeout: Int,
-  problem: String,
+  config: AlarmConfig(memory),
 ) -> DurableObject(memory)
 
 @external(javascript, "./durable_object/alarm_ffi.mts", "schedule")
