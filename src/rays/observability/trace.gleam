@@ -10,7 +10,7 @@
 ////
 //// ```gleam
 //// import gleam/javascript/promise.{type Promise}
-//// import rays/trace
+//// import rays/observability/trace
 ////
 //// fn show_user(id: String, env: Env) -> Promise(Response) {
 ////   use <- trace.span("load_user", [#("user.id", trace.string(id))])
@@ -59,7 +59,7 @@
 //// around work that waits on something, such as a group of fetches or
 //// queries.
 ////
-//// Logs written with `rays/log` inside a span are attached to it. Keep
+//// Logs written with `rays/observability/log` inside a span are attached to it. Keep
 //// secrets and personal data out of attributes, and keep attributes small:
 //// Cloudflare drops an attribute that is too large.
 

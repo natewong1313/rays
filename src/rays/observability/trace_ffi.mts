@@ -1,4 +1,4 @@
-// FFI shim for `rays/trace`: the Workers runtime's tracing API, from
+// FFI shim for `rays/observability/trace`: the Workers runtime's tracing API, from
 // `cloudflare:workers`, behind functions that do nothing until a Worker's
 // entry module hands it over.
 //

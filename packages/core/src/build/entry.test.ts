@@ -1,4 +1,4 @@
-// Tests which entry modules hand the runtime's tracing API to `rays/trace`,
+// Tests which entry modules hand the runtime's tracing API to `rays/observability/trace`,
 // and how they hand Durable Object classes their migrations.
 
 import { describe, expect, it } from "vitest";
@@ -43,7 +43,7 @@ function count(source: string, text: string): number {
 
 describe("entrySource", () => {
   it("leaves cloudflare:workers out of a Worker with only fetch", () => {
-    // It gives rays/trace `ctx.tracing` on each request instead, so the
+    // It gives rays/observability/trace `ctx.tracing` on each request instead, so the
     // module still loads outside the Workers runtime.
     const source = entrySource("app", "/build/app/app.mjs", options);
     expect(source).not.toContain("cloudflare:workers");

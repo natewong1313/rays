@@ -1,5 +1,5 @@
 // A fake of the Workers runtime's tracing API that records spans, so tests
-// can check what `rays/trace` and `rays/worker` do with it.
+// can check what `rays/observability/trace` and `rays/worker` do with it.
 //
 // Spans nest through a stack rather than the runtime's async context, which
 // is right for tests that run one request at a time.

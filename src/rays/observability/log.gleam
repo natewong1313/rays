@@ -9,7 +9,7 @@
 ////
 //// ```gleam
 //// import gleam/json
-//// import rays/log
+//// import rays/observability/log
 ////
 //// log.info("Cache warmed", [])
 ////

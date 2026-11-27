@@ -1,6 +1,6 @@
 // Helpers for `log_test`: capturing what is written to the `console`.
 
-import { toList } from "../gleam.mjs";
+import { toList } from "../../gleam.mjs";
 
 const methods = ["debug", "info", "warn", "error", "log"] as const;
 

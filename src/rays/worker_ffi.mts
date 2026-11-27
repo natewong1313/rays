@@ -12,7 +12,7 @@ import {
   Result$Ok,
 } from "../gleam.mjs";
 import type { BitArray, Result } from "../gleam.mjs";
-import { activeSpan, recordThrown, useTracing } from "./trace_ffi.mts";
+import { activeSpan, recordThrown, useTracing } from "./observability/trace_ffi.mts";
 
 export type Env = Record<string, unknown>;
 
@@ -27,7 +27,7 @@ export type Worker = ExportedHandler<Env> & { readonly [WORKER_BRAND]: true };
 
 // `ExportedHandler` and others are from `@cloudflare/workers-types`.
 //
-// Each request hands `ctx.tracing` to `rays/trace`, for Workers whose entry
+// Each request hands `ctx.tracing` to `rays/observability/trace`, for Workers whose entry
 // module doesn't, and records an error the handler throws, such as a Gleam
 // panic, on the request's span before passing it on to the runtime.
 export function makeWorker(fetch: ExportedHandlerFetchHandler<Env>): Worker {

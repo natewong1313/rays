@@ -1,11 +1,11 @@
-//// Tests for `rays/trace`, and for the tracing `rays/worker` does on its
+//// Tests for `rays/observability/trace`, and for the tracing `rays/worker` does on its
 //// own, against a fake of the runtime's tracing API that records spans.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/javascript/array.{type Array}
 import gleam/javascript/promise.{type Promise}
 import gleam/list
-import rays/trace
+import rays/observability/trace
 import rays/worker.{type Handler}
 
 /// A span the fake recorded. Attribute values are written as
@@ -259,14 +259,14 @@ type JsRequest
 
 type JsResponse
 
-@external(javascript, "./worker/fetch_api_test_ffi.mts", "request")
+@external(javascript, "../worker/fetch_api_test_ffi.mts", "request")
 fn js_request(
   method: String,
   url: String,
   headers: Array(#(String, String)),
 ) -> JsRequest
 
-@external(javascript, "./worker/fetch_api_test_ffi.mts", "run")
+@external(javascript, "../worker/fetch_api_test_ffi.mts", "run")
 fn js_run(
   worker: worker.Worker,
   request: JsRequest,
@@ -326,8 +326,9 @@ pub fn panic_is_recorded_on_request_span_test() {
   assert root.exceptions == ["the handler crashed"]
   assert root.status == "error: the handler crashed"
   let assert Ok("string:panic") = list.key_find(root.attributes, "gleam.error")
-  let assert Ok("string:rays/trace_test.panic_is_recorded_on_request_span_test") =
-    list.key_find(root.attributes, "code.function.name")
+  let assert Ok(
+    "string:rays/observability/trace_test.panic_is_recorded_on_request_span_test",
+  ) = list.key_find(root.attributes, "code.function.name")
   let assert Ok("string:" <> _) =
     list.key_find(root.attributes, "code.file.path")
   let assert Ok("number:" <> _) =

@@ -38,8 +38,8 @@ import { currentEnv, describeError, useEnv } from "./worker_ffi.mts";
 import type { Env, Worker } from "./worker_ffi.mts";
 
 // Entry modules with RPC methods hand the runtime's tracing API to
-// `rays/trace` through this module, which they import anyway.
-export { useTracing } from "./trace_ffi.mts";
+// `rays/observability/trace` through this module, which they import anyway.
+export { useTracing } from "./observability/trace_ffi.mts";
 
 type GleamDict = { readonly __dict: unique symbol };
 

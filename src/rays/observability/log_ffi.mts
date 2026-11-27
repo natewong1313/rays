@@ -1,4 +1,4 @@
-// FFI shim for `rays/log`: writing logs with the `console` methods, which the
+// FFI shim for `rays/observability/log`: writing logs with the `console` methods, which the
 // Workers runtime sends to Workers Logs and `wrangler tail`, and holding the
 // minimum level.
 //

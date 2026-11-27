@@ -32,9 +32,9 @@ import {
 } from "./durable_object/alarm_ffi.mts";
 
 // Entry modules with Durable Objects hand the runtime's tracing API to
-// `rays/trace` through this module, which they import anyway, and each
+// `rays/observability/trace` through this module, which they import anyway, and each
 // class's `alarm` method runs its alarms with `runAlarms`.
-export { useTracing } from "./trace_ffi.mts";
+export { useTracing } from "./observability/trace_ffi.mts";
 export { runAlarms } from "./durable_object/alarm_ffi.mts";
 
 // Classes

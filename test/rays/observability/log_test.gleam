@@ -1,8 +1,8 @@
-//// Tests for `rays/log`: which `console` method each level uses, the values
+//// Tests for `rays/observability/log`: which `console` method each level uses, the values
 //// passed to it, loggers' fields, and the minimum level.
 
 import gleam/json
-import rays/log
+import rays/observability/log
 
 /// Each `console` call made while running `run`: the method name and its
 /// arguments as a JSON array.

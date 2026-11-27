@@ -44,7 +44,7 @@ import gleam/result
 import gleam/string
 import gleam/uri
 import rays/internal/route
-import rays/trace
+import rays/observability/trace
 
 //
 // Worker
@@ -96,7 +96,7 @@ type JsResponse
 ///
 /// With [tracing](https://developers.cloudflare.com/workers/observability/traces/)
 /// enabled, the Worker also adds to the span Cloudflare records for each
-/// request, as described in `rays/trace`: it names the span after the
+/// request, as described in `rays/observability/trace`: it names the span after the
 /// request's route, such as `GET /users/:id`, records the response's status,
 /// marks 5xx responses as failed, and records where a panic happened.
 ///
