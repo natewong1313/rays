@@ -6,7 +6,7 @@ import gleam/option.{None, Some}
 import rays/durable_object/sql.{QueryFailed}
 
 pub fn query_failed_with_extended_code_test() {
-  assert sql.query_failed(
+  assert sql.error_msg_to_query_error(
       "UNIQUE constraint failed: people.name: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)",
     )
     == QueryFailed(
@@ -16,7 +16,7 @@ pub fn query_failed_with_extended_code_test() {
 }
 
 pub fn query_failed_with_primary_code_test() {
-  assert sql.query_failed(
+  assert sql.error_msg_to_query_error(
       "near \"SELEC\": syntax error at offset 0: SQLITE_ERROR",
     )
     == QueryFailed(
@@ -26,22 +26,24 @@ pub fn query_failed_with_primary_code_test() {
 }
 
 pub fn query_failed_with_empty_message_test() {
-  assert sql.query_failed(": SQLITE_ERROR")
+  assert sql.error_msg_to_query_error(": SQLITE_ERROR")
     == QueryFailed(code: Some("SQLITE_ERROR"), message: "")
 }
 
 pub fn query_failed_without_code_test() {
-  assert sql.query_failed("Wrong number of parameter bindings for SQL query.")
+  assert sql.error_msg_to_query_error(
+      "Wrong number of parameter bindings for SQL query.",
+    )
     == QueryFailed(
       code: None,
       message: "Wrong number of parameter bindings for SQL query.",
     )
-  assert sql.query_failed("not a code: sqlite_error")
+  assert sql.error_msg_to_query_error("not a code: sqlite_error")
     == QueryFailed(code: None, message: "not a code: sqlite_error")
 }
 
 pub fn query_failed_with_malformed_extended_code_test() {
-  assert sql.query_failed("bad: SQLITE_CONSTRAINT (extended: nope)")
+  assert sql.error_msg_to_query_error("bad: SQLITE_CONSTRAINT (extended: nope)")
     == QueryFailed(
       code: None,
       message: "bad: SQLITE_CONSTRAINT (extended: nope)",

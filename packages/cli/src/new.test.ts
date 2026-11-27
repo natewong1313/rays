@@ -77,7 +77,7 @@ describe("rays new", () => {
   it("depends on rays from Hex by default", async () => {
     rays(["new", "app", "--no-install"]);
     const toml = await readFile(path.join(parent, "app", "gleam.toml"), "utf8");
-    expect(toml).toContain('rays = ">= 1.0.0 and < 2.0.0"');
+    expect(toml).toContain('rays = ">= 0.1.0 and < 1.0.0"');
   });
 
   it("refuses a directory that isn't empty", async () => {

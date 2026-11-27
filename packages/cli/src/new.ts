@@ -49,7 +49,7 @@ export async function createProject(options: NewOptions): Promise<string> {
 
   const rays =
     options.raysPath === undefined
-      ? `">= 1.0.0 and < 2.0.0"`
+      ? `">= 0.1.0 and < 1.0.0"`
       : `{ path = ${JSON.stringify(
           path.relative(root, path.resolve(options.raysPath)) || ".",
         )} }`;
