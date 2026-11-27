@@ -3,6 +3,7 @@
 
 import gleam/int
 import gleam/javascript/promise.{type Promise}
+import rays/app
 import rays/durable_object
 import rays/durable_object_example/chat_room
 import rays/worker.{type Context, type Env, type Request, type Response}
@@ -10,9 +11,9 @@ import rays/worker.{type Context, type Env, type Request, type Response}
 pub fn handle_request(
   _request: Request,
   _env: Env,
-  ctx: Context,
+  _ctx: Context,
 ) -> Promise(Response) {
-  case durable_object.exported(ctx, chat_room.chat_room) {
+  case app.connect_durable_object(chat_room.chat_room) {
     Ok(rooms) -> {
       let room = durable_object.get_by_name(rooms, "general")
       let posted = durable_object.call(room, chat_room.post, "Hello!")

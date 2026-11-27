@@ -4,8 +4,11 @@
 import gleam/javascript/promise.{type Promise}
 import gleam/list
 import gleam/string
+import rays/app
 import rays/worker
 import rays/worker_rpc
+
+pub const worker = app.Worker("names", entrypoint: main)
 
 pub fn main() -> worker.Worker {
   worker.new(fn(_request, _env, _ctx) { promise.resolve(worker.not_found()) })

@@ -5,6 +5,7 @@
 import gleam/http
 import gleam/javascript/promise.{type Promise}
 import gleam/option.{type Option, None, Some}
+import rays/app
 import rays/worker
 import rays/worker/simulate
 import rays/worker_rpc
@@ -127,16 +128,19 @@ pub fn missing_service_test() {
 
 pub fn module_docs_example_test() -> Promise(Nil) {
   let ctx = simulate.context()
-  let env =
-    simulate.env()
-    |> simulate.with_rpc_service(
-      "NAMES",
-      ctx,
-      example_names.main(),
-      simulate.env(),
-    )
+  let front =
+    app.Worker("front", entrypoint: fn() {
+      worker.new(example_app.handle_request)
+    })
+  app.new("example", main: front)
+  |> app.register_worker(example_names.worker)
+  |> app.simulate(context: ctx)
   let request = simulate.request(http.Get, "/")
-  use response <- promise.map(example_app.handle_request(request, env, ctx))
+  use response <- promise.map(example_app.handle_request(
+    request,
+    simulate.env(),
+    ctx,
+  ))
   assert response.status == 200
   assert simulate.read_body(response) == "Ada, Adam"
 }

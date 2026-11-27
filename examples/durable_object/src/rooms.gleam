@@ -1,14 +1,26 @@
 //// A Worker with chat rooms. Each room is an instance of the `ChatRoom`
-//// Durable Object class, named after the room, which the Worker reaches
-//// through `ctx.exports`. A room keeps its messages in its SQLite database.
+//// Durable Object class, named after the room. A room keeps its messages in
+//// its SQLite database.
+////
+//// The app is this one Worker, which hosts the class. `raysApp()` in
+//// `cloudflare.config.ts` reads `app` to configure it.
 
 import gleam/http.{Get, Post}
 import gleam/int
 import gleam/javascript/promise.{type Promise}
 import gleam/string
+import rays/app.{type App}
 import rays/durable_object.{type Namespace}
 import rays/worker.{type Context, type Env, type Request, type Response}
 import rooms/chat_room
+
+pub fn app() -> App {
+  app.new("rays-durable-object", main: worker)
+  |> app.register_durable_object(chat_room.chat_room, hosted_by: worker)
+}
+
+/// The Worker, for the app to register.
+pub const worker = app.Worker("rooms", entrypoint: main)
 
 pub fn main() -> worker.Worker {
   worker.new(handle_request)
@@ -17,9 +29,9 @@ pub fn main() -> worker.Worker {
 pub fn handle_request(
   request: Request,
   _env: Env,
-  ctx: Context,
+  _ctx: Context,
 ) -> Promise(Response) {
-  let assert Ok(rooms) = durable_object.exported(ctx, chat_room.chat_room)
+  let assert Ok(rooms) = app.connect_durable_object(chat_room.chat_room)
 
   case request.method, worker.path_segments(request) {
     Post, ["rooms", name] -> post_message(request, rooms, name)

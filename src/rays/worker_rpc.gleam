@@ -12,8 +12,11 @@
 //// import gleam/javascript/promise.{type Promise}
 //// import gleam/list
 //// import gleam/string
+//// import rays/app
 //// import rays/worker
 //// import rays/worker_rpc
+////
+//// pub const worker = app.Worker("names", entrypoint: main)
 ////
 //// pub fn main() -> worker.Worker {
 ////   worker.new(fn(_request, _env, _ctx) { promise.resolve(worker.not_found()) })
@@ -34,29 +37,26 @@
 //// ```
 ////
 //// ```gleam
-//// // src/app.gleam, a Worker with a service binding NAMES to the one above
+//// // src/app.gleam, another Worker of the same app (see `rays/app`)
 //// import app/names
 //// import gleam/javascript/promise.{type Promise}
 //// import gleam/string
+//// import rays/app
 //// import rays/worker.{type Context, type Env, type Request, type Response}
 //// import rays/worker_rpc
 ////
 //// pub fn handle_request(
 ////   _request: Request,
-////   env: Env,
+////   _env: Env,
 ////   _ctx: Context,
 //// ) -> Promise(Response) {
-////   case worker_rpc.service(env, "NAMES") {
-////     Ok(service) -> {
-////       let call = worker_rpc.call(service, names.search, names.Search("Ad", 2))
-////       use found <- promise.map(call)
-////       case found {
-////         Ok(found) ->
-////           worker.ok() |> worker.string_body(string.join(found, ", "))
-////         Error(_) -> worker.response(502)
-////       }
-////     }
-////     Error(Nil) -> promise.resolve(worker.internal_server_error())
+////   let call =
+////     app.connect_worker(names.worker)
+////     |> worker_rpc.call(names.search, names.Search("Ad", 2))
+////   use found <- promise.map(call)
+////   case found {
+////     Ok(found) -> worker.ok() |> worker.string_body(string.join(found, ", "))
+////     Error(_) -> worker.response(502)
 ////   }
 //// }
 //// ```
@@ -147,21 +147,13 @@ pub fn bind(
 ///
 pub type Service
 
-/// Get the Worker bound to the given name, through a service binding.
-///
-/// Returns an error if there is no binding with that name. Whether the
-/// binding really is a rays Worker is only known when a method is called.
-///
-/// # Examples
-///
-/// ```gleam
-/// case worker_rpc.service(env, "NAMES") {
-///   Ok(names) -> todo
-///   Error(Nil) -> worker.internal_server_error() |> promise.resolve
-/// }
-/// ```
+/// Get the Worker bound to the given name, through a service binding, or an
+/// error if there is no binding with that name. For rays itself: reach a
+/// Worker with `rays/app`'s `connect_worker`, or `connect_worker_binding`
+/// for one outside the app.
 ///
 @external(javascript, "./worker_rpc_ffi.mts", "service")
+@internal
 pub fn service(env: Env, name: String) -> Result(Service, Nil)
 
 /// An error that can occur when calling a method on another Worker.

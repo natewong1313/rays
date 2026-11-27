@@ -47,19 +47,21 @@
 //// A Worker calls the methods of an instance through a stub:
 ////
 //// ```gleam
-//// // src/app.gleam
+//// // src/app.gleam, a Worker of an app that registers the class (see
+//// // `rays/app`)
 //// import app/chat_room
 //// import gleam/int
 //// import gleam/javascript/promise.{type Promise}
+//// import rays/app
 //// import rays/durable_object
 //// import rays/worker.{type Context, type Env, type Request, type Response}
 ////
 //// pub fn handle_request(
 ////   _request: Request,
 ////   _env: Env,
-////   ctx: Context,
+////   _ctx: Context,
 //// ) -> Promise(Response) {
-////   case durable_object.exported(ctx, chat_room.chat_room) {
+////   case app.connect_durable_object(chat_room.chat_room) {
 ////     Ok(rooms) -> {
 ////       let room = durable_object.get_by_name(rooms, "general")
 ////       let posted = durable_object.call(room, chat_room.post, "Hello!")
@@ -184,17 +186,10 @@
 ////
 //// Every public function in the package that takes no arguments and
 //// returns a `DurableObject` is a class, named after the function in
-//// PascalCase, so `chat_room` is `ChatRoom`. That is the name the Cloudflare
-//// configuration declares in the Worker's `exports`:
-////
-//// ```ts
-//// // cloudflare.config.ts
-//// worker: raysWorker({
-////   name: "my-app",
-////   compatibilityDate: "2026-09-01",
-////   exports: { ChatRoom: exports.durableObject({ storage: "sqlite" }) },
-//// }),
-//// ```
+//// PascalCase, so `chat_room` is `ChatRoom`. An app registers it with
+//// `rays/app`'s `register_durable_object`, and `raysApp()` declares it under
+//// that name in the hosting Worker's `exports`, and binds every Worker of
+//// the app to it.
 ////
 //// A Worker's entry module exports only the classes its `exports` declare,
 //// and the build fails if one isn't in the package. A class's name is the
@@ -782,46 +777,23 @@ pub type Namespace(memory)
 pub type Stub(memory)
 
 /// Get the namespace bound to the given name, through a Durable Object
-/// binding.
+/// binding, or an error if there is no binding with that name. For rays
+/// itself: reach a class with `rays/app`'s `connect_durable_object`, or
+/// `connect_durable_object_binding` for one outside the app.
 ///
-/// Returns an error if there is no binding with that name. Whether the
-/// binding really is a namespace of this class is only known when a method
-/// is called: if it isn't, calls fail with `RpcFailed(NotBound(..))`.
-///
-/// # Examples
-///
-/// ```gleam
-/// case durable_object.namespace(env, "ROOMS") {
-///   Ok(rooms) -> todo
-///   Error(Nil) -> worker.internal_server_error() |> promise.resolve
-/// }
-/// ```
-///
+@internal
 pub fn namespace(env: Env, name: String) -> Result(Namespace(memory), Nil) {
   worker.env_binding(env, name)
   |> result.try(js_namespace)
 }
 
 /// Get the namespace of a class that this Worker exports, through
-/// `ctx.exports`, without a binding.
-///
-/// The class is given as the function that defines it, so the namespace has
-/// its memory type.
-///
-/// Returns an error if this Worker doesn't export the class, as when one
-/// project builds several Workers and the class is declared in another's
-/// configuration.
-///
-/// # Examples
-///
-/// ```gleam
-/// case durable_object.exported(ctx, chat_room.chat_room) {
-///   Ok(rooms) -> durable_object.get_by_name(rooms, "general")
-///   Error(Nil) -> todo
-/// }
-/// ```
+/// `ctx.exports`, without a binding, or an error if it doesn't export it.
+/// For rays's own tests: reach a class with `rays/app`'s
+/// `connect_durable_object`.
 ///
 @external(javascript, "./durable_object_ffi.mts", "exported")
+@internal
 pub fn exported(
   ctx: worker.Context,
   class: fn() -> DurableObject(memory),

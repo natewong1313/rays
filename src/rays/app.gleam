@@ -371,6 +371,58 @@ pub fn connect_durable_object(
 @external(javascript, "./app_ffi.mts", "currentEnv")
 fn js_current_env() -> Result(Env, Nil)
 
+//
+// Reaching resources outside the app
+//
+
+/// Connect to a rays Worker outside the app, through a service binding
+/// configured by hand, such as one to another team's Worker. For a Worker
+/// of the app, use `connect_worker`, which needs no binding name.
+///
+/// Like `connect_worker`, this always succeeds, and a call fails with
+/// `worker_rpc.NotConfigured` if the Worker has no binding with that name.
+/// Whether the binding really is a rays Worker that serves the method is
+/// only known when it is called.
+///
+/// # Examples
+///
+/// ```gleam
+/// app.connect_worker_binding("BILLING")
+/// |> worker_rpc.call(billing.charge, order)
+/// ```
+///
+pub fn connect_worker_binding(binding: String) -> worker_rpc.Service {
+  js_bound_service(binding)
+}
+
+/// Connect to a Durable Object class outside the app, through a Durable
+/// Object binding configured by hand, such as one to a class another
+/// project hosts. For a class of the app, use `connect_durable_object`.
+///
+/// A binding name carries no type, so nothing checks that the namespace is
+/// of the class you expect: its memory type is whatever the first method
+/// you call it with says. Calling a method of another class fails with
+/// `durable_object.RpcFailed(worker_rpc.NotBound(..))`, at runtime.
+///
+/// Returns an error if the Worker has no binding with that name, or the
+/// binding isn't a Durable Object namespace.
+///
+/// # Examples
+///
+/// ```gleam
+/// case app.connect_durable_object_binding("SESSIONS") {
+///   Ok(sessions) -> durable_object.get_by_name(sessions, session_id)
+///   Error(Nil) -> todo
+/// }
+/// ```
+///
+pub fn connect_durable_object_binding(
+  binding: String,
+) -> Result(Namespace(memory), Nil) {
+  use env <- result.try(js_current_env())
+  durable_object.namespace(env, binding)
+}
+
 // The binding name of a Worker of the app: its name in uppercase, with
 // hyphens as underscores, so `"order-history"` is `ORDER_HISTORY`.
 fn service_binding(worker: Worker) -> String {
